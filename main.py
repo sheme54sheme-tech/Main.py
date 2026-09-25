@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.tl.custom import Button
 from telethon.tl.types import User, Channel
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 
 # ---- خادم الويب لإبقاء البوت حياً 24/7 (متوافق مع Render) ----
 from flask import Flask
@@ -42,10 +41,8 @@ except ValueError as error:
 
 API_HASH = required_env("TELEGRAM_API_HASH")
 TARGET_CHAT_ID = required_env("TELEGRAM_TARGET_CHAT_ID")
-BOT_TOKEN = required_env("BOT_TOKEN")
 
 client = TelegramClient('userbot_session', API_ID, API_HASH)
-telegram_bot = Bot(token=BOT_TOKEN)
 
 # قائمة القروبات المسموح بالالتقاط منها
 ALLOWED_GROUPS = [
@@ -116,7 +113,7 @@ async def handle_new_message(event):
     # استثناء قروب التجربة من الفلترة لكي يقبل أي رسالة تختبرها بحرية
     if group_username != "Testorders1":
         if not is_real_customer_request(text):
-            return  # تجاهل إعلانات المناديب والرسائل العشوائية
+            return
 
     sender = await event.get_sender()
 
@@ -139,7 +136,7 @@ async def handle_new_message(event):
 
     message_link = f"https://t.me/c/{chat.id}/{event.message.id}" if getattr(chat, 'id', None) else ""
 
-    # التنسيق المطلوب: نص الطلب والأزرار عبر البوت الرسمي
+    # تنسيق الرسالة والأزرار
     notification_text = (
         f"🚗 **طلب مشوار جديد**\n"
         f"━━━━━━━━━━━━━━━━━━\n"
@@ -149,27 +146,19 @@ async def handle_new_message(event):
         f"> {text}\n"
     )
 
-    # أزرار البوت الرسمي (python-telegram-bot)
-    keyboard = [
-        [InlineKeyboardButton("⚡ إرسال رسالة آلياً للعميل", callback_data=f"send_pm_{sender_id}")],
+    buttons = [
+        [Button.inline("⚡ إرسال رسالة آلياً للعميل", data=f"send_pm_{sender_id}".encode())],
         [
-            InlineKeyboardButton("💬 محادثة العميل", url=user_link),
-            InlineKeyboardButton("👥 فتح الرسالة", url=message_link if message_link else user_link)
+            Button.url("💬 محادثة العميل", user_link),
+            Button.url("👥 فتح الرسالة", message_link if message_link else user_link)
         ]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
 
     try:
-        # استخدام بوت تليجرام الرسمي لإرسال الرسالة إلى الآيدي الخاص بك (810093811)
-        target_chat = int(TARGET_CHAT_ID) if TARGET_CHAT_ID.lstrip('-').isdigit() else TARGET_CHAT_ID
-        await telegram_bot.send_message(
-            chat_id=target_chat,
-            text=notification_text,
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
+        target = int(TARGET_CHAT_ID) if TARGET_CHAT_ID.lstrip('-').isdigit() else TARGET_CHAT_ID
+        await client.send_message(target, notification_text, buttons=buttons)
     except Exception as e:
-        print(f"Error sending notification via Bot API: {e}")
+        print(f"Error sending notification: {e}")
 
 async def main():
     await client.connect()
@@ -179,7 +168,7 @@ async def main():
             "a Telegram login is required."
         )
 
-    print("🚀 Userbot running with Bot API bridge and exact layout...", flush=True)
+    print("🚀 Userbot running stably...", flush=True)
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
