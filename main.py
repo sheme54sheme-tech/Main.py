@@ -6,7 +6,7 @@ from telethon import TelegramClient, events
 from telethon.tl.custom import Button
 from telethon.tl.types import User, Channel
 
-# ---- إضافة خادم الويب لإبقاء البوت حياً 24/7 ----
+# ---- إضافة خادم الويب لإبقاء البوت حياً 24/7 (متوافق مع Render) ----
 from flask import Flask
 from threading import Thread
 
@@ -14,11 +14,11 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Bot is alive and running!"
+    return "Bot is alive and running!", 200
 
 def run_web_server():
-    # Replit يستخدم عادة المنفذ 8080 أو المنفذ المحدد في البيئة
-    port = int(os.environ.get("PORT", 8080))
+    # Render يعتمد على متغير البيئة PORT وغالباً ما يكون الافتراضي 10000
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
@@ -27,16 +27,14 @@ def keep_alive():
     t.start()
 # -----------------------------------------------
 
-# جلب بيانات الاعتماد من البيئة (Secrets) بدون قيم افتراضية حساسة
+# جلب بيانات الاعتماد من البيئة (Environment Variables) بدون قيم افتراضية حساسة
 load_dotenv()
-
 
 def required_env(name):
     value = os.getenv(name)
     if not value:
         raise RuntimeError(f"Missing required environment variable: {name}")
     return value
-
 
 try:
     API_ID = int(required_env("TELEGRAM_API_ID"))
@@ -222,10 +220,9 @@ async def main():
     )
     await client.run_until_disconnected()
 
-
 if __name__ == "__main__":
     try:
-        # تشغيل خادم الويب لمنع Replit من إيقاف المشهد
+        # تشغيل خادم الويب في الخلفية لمنع توقف الخدمة واستجابة UptimeRobot
         keep_alive()
 
         asyncio.run(main())
