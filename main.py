@@ -6,7 +6,7 @@ from telethon import TelegramClient, events
 from telethon.tl.custom import Button
 from telethon.tl.types import User, Channel
 
-# ---- إضافة خادم الويب لإبقاء البوت حياً 24/7 (متوافق مع Render) ----
+# ---- خادم الويب لإبقاء البوت حياً 24/7 (متوافق مع Render) ----
 from flask import Flask
 from threading import Thread
 
@@ -44,9 +44,9 @@ TARGET_CHAT_ID = required_env("TELEGRAM_TARGET_CHAT_ID")
 
 client = TelegramClient('userbot_session', API_ID, API_HASH)
 
-# قائمة القروبات المسموح بالالتقاط منها (تمت إضافة قروب الاختبار الجديد Testorders1)
+# قائمة القروبات المسموح بالالتقاط منها
 ALLOWED_GROUPS = [
-    "Testorders1",
+    "Testorders1",       # قروب التجربة (يلتقط كل شيء للاختبار)
     "Jazan_Taxi",
     "taxijazan",
     "JazanMover",
@@ -82,22 +82,6 @@ DRIVER_EXCLUDE_KEYWORDS = [
     "نوصل", "نقدم خدمة", "للتواصل واتس", "عبر الواتس", "على الواتس"
 ]
 
-DESTINATION_PATTERNS = [
-    r"(?:إلى|الي|لـ|ل|اتجاه|رايح)\s+([\w\s]+)",
-    r"(?:من\s+[\w\s]+\s+(?:إلى|الي|لـ|ل)\s+([\w\s]+))",
-    r"(?:لمخطط|مخطط)\s*([\w\d\s]+)",
-    r"\b(صبيا|أبو عريش|ابو عريش|صامطة|صامطه|جيزان|جازان|أحد المسارحة|احد المسارحه|الدرب|بيش|العارضة|العارضه)\b"
-]
-
-def extract_destination(text):
-    for pattern in DESTINATION_PATTERNS:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            dest = match.group(1).strip() if match.groups() else match.group(0).strip()
-            dest = re.sub(r'^(إلى|الي|لـ|ل)\s*', '', dest)
-            return dest
-    return "جديد"
-
 def is_real_customer_request(text):
     text_clean = text.lower().strip()
     if re.search(r'@[a-zA-Z0-9_]+', text_clean):
@@ -120,11 +104,18 @@ async def handle_new_message(event):
     if event.is_private or event.out:
         return
     text = event.message.message
-    if not text or not is_real_customer_request(text):
+    if not text:
         return
 
-    sender = await event.get_sender()
     chat = await event.get_chat()
+    group_username = getattr(chat, 'username', '')
+
+    # استثناء قروب التجربة من الفلترة لكي يقبل أي رسالة تختبرها بحرية
+    if group_username != "Testorders1":
+        if not is_real_customer_request(text):
+            return  # تجاهل إعلانات المناديب والرسائل العشوائية في القروبات العامة
+
+    sender = await event.get_sender()
 
     if isinstance(sender, User):
         sender_name = f"{sender.first_name or ''} {sender.last_name or ''}".strip() or "عميل"
@@ -145,7 +136,7 @@ async def handle_new_message(event):
 
     message_link = f"https://t.me/c/{chat.id}/{event.message.id}" if getattr(chat, 'id', None) else ""
 
-    # التنسيق المحدث: نص الطلب في المنتصف والأزرار في الأسفل
+    # التنسيق المطلوب: نص الطلب في المنتصف والأزرار في الأسفل
     notification_text = (
         f"🚗 **طلب مشوار جديد**\n"
         f"━━━━━━━━━━━━━━━━━━\n"
@@ -155,7 +146,7 @@ async def handle_new_message(event):
         f"> {text}\n"
     )
 
-    # الأزرار في الأسفل (زر إرسال آلي بالأعلى، وتحته زر محادثة العميل وزر فتح الرسالة)
+    # الأزرار الثلاثة المطلوبة في الأسفل
     buttons = [
         [Button.inline("⚡ إرسال رسالة آلياً للعميل", data=f"send_pm:{sender_id}")],
         [
@@ -199,7 +190,7 @@ async def main():
             "a Telegram login is required."
         )
 
-    print("🚀 Userbot running with Testorders1 group integrated...", flush=True)
+    print("🚀 Userbot running with smart filters and exact layout...", flush=True)
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
