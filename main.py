@@ -3,6 +3,7 @@ import re
 import asyncio
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
+from telethon.tl.custom import Button
 from telethon.tl.types import User, Channel
 
 # ---- خادم الويب لإبقاء البوت حياً 24/7 (متوافق مع Render) ----
@@ -124,41 +125,58 @@ async def handle_new_message(event):
         sender_name = "عميل"
 
     group_title = getattr(chat, 'title', 'قروب توصيل')
-
     sender_id = getattr(sender, 'id', event.sender_id)
     username = getattr(sender, 'username', None)
 
-    # تجهيز روابط مباشرة تعمل بالضغط الفوري
-    if username:
-        user_link = f"https://t.me/{username}"
-    else:
-        user_link = f"tg://user?id={sender_id}"
-
+    user_link = f"https://t.me/{username}" if username else f"tg://user?id={sender_id}"
     message_link = f"https://t.me/c/{chat.id}/{event.message.id}" if getattr(chat, 'id', None) else user_link
 
-    # رابط مباشر لإرسال الرسالة الجاهزة للعميل بنقرة واحدة
-    auto_text_encoded = "السلام عليكم، حصلتم ولا لسا؟! إذا باقي أنا بتمم معاك"
-    pm_shortcut_link = f"tg://msg?to={sender_id}&text={auto_text_encoded}" if not username else f"https://t.me/{username}"
-
-    # تنسيق احترافي ونظيف يعتمد على الروابط النصية المباشرة (يعمل بنسبة 100% في القنوات والخاص)
+    # تنسيق رسالة التنبيه كما كانت تعمل بنجاح تام
     notification_text = (
         f"🚗 **طلب مشوار جديد**\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"👤 **العميل:** {sender_name}\n"
         f"📍 **المصدر:** {group_title}\n\n"
         f"💬 **نص الطلب:**\n"
-        f"> {text}\n\n"
-        f"🔗 **روابط سريعة للتفاعل:**\n"
-        f"⚡ [إرسال رسالة جاهزة للعميل]({pm_shortcut_link})\n"
-        f"💬 [محادثة العميل مباشرة]({user_link})\n"
-        f"👥 [فتح الرسالة الأصلية في القروب]({message_link})"
+        f"> {text}\n"
     )
+
+    # زر إرسال الرسالة الجاهزة آلياً بالتفاعل المباشر
+    buttons = [
+        [Button.inline("⚡ إرسال رسالة آلياً للعميل", data=f"send_ready_{sender_id}".encode())],
+        [
+            Button.url("💬 محادثة العميل", user_link),
+            Button.url("👥 فتح الرسالة", message_link)
+        ]
+    ]
 
     try:
         target_peer = int(TARGET_CHAT_ID) if TARGET_CHAT_ID.lstrip('-').isdigit() else TARGET_CHAT_ID
-        await client.send_message(target_peer, notification_text, link_preview=False, parse_mode='md')
+        await client.send_message(target_peer, notification_text, buttons=buttons, link_preview=False)
     except Exception as e:
         print(f"Error sending notification: {e}")
+
+# دالة الاستجابة للزر لتنفيذ إرسال الرسالة المطلوبة فوراً
+@client.on(events.CallbackQuery(data=re.compile(br"send_ready_(-?\d+)")))
+async def handle_send_ready_message(event):
+    sender_id = int(event.pattern_match.group(1))
+
+    ready_message = (
+        "السلام عليكم\n\n"
+        "حصلتم ولا لسسى!!\n\n"
+        "اذا باقي انا بتمم معاك👍🏻"
+    )
+
+    try:
+        await client.send_message(sender_id, ready_message)
+        await event.answer("✅ تم إرسال الرسالة بنجاح!", alert=True)
+
+        await event.edit(buttons=[
+            [Button.inline("✅ تم التواصل مع العميل", data="done_sent")],
+            [Button.url("💬 محادثة العميل", f"tg://user?id={sender_id}")]
+        ])
+    except Exception as e:
+        await event.answer(f"❌ تعذر الإرسال: {e}", alert=True)
 
 async def main():
     await client.connect()
@@ -168,7 +186,7 @@ async def main():
             "a Telegram login is required."
         )
 
-    print("🚀 Userbot running stably with clean text links...", flush=True)
+    print("🚀 Userbot running with functional auto-send button...", flush=True)
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
