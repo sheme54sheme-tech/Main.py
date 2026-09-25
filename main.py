@@ -172,12 +172,14 @@ async def handle_new_message(event):
         f"> {text}\n"
     )
 
+    # التنسيق الجديد للأزرار حسب طلبك
     buttons = [
         [Button.inline("⚡ إرسال رسالة آلياً للعميل", data=f"send_pm:{sender_id}")],
-        [Button.url("💬 فتح محادثة العميل", user_link)]
+        [
+            Button.url("💬 محادثة العميل", user_link),
+            Button.url("👥 فتح الرسالة", message_link) if message_link else Button.url("👥 القروب", user_link)
+        ]
     ]
-    if message_link:
-        buttons.append([Button.url("👥 فتح الرسالة في القروب", message_link)])
 
     try:
         target_peer = int(TARGET_CHAT_ID) if TARGET_CHAT_ID.lstrip('-').isdigit() else TARGET_CHAT_ID
@@ -201,7 +203,7 @@ async def handle_auto_reply_click(event):
 
         await event.edit(buttons=[
             [Button.inline("✅ تم التواصل مع العميل", data="done")],
-            [Button.url("💬 فتح محادثة العميل", f"tg://user?id={user_id}")]
+            [Button.url("💬 محادثة العميل", f"tg://user?id={user_id}")]
         ])
     except Exception as e:
         await event.answer(f"❌ تعذر الإرسال بسبب الخصوصية: {e}", alert=True)
