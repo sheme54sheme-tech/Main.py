@@ -138,7 +138,7 @@ async def handle_new_message(event):
         f"👤 **العميل:** {sender_name}\n"
         f"📍 **المصدر:** {group_title}\n\n"
         f"💬 **نص الطلب:**\n"
-        f"🟢 {text}\n"
+        f"🟢> {text}\n"
     )
 
     # زر إرسال الرسالة الجاهزة آلياً بالتفاعل المباشر
