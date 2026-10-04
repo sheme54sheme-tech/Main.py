@@ -134,21 +134,25 @@ async def handle_new_message(event):
     else:
         user_link = f"tg://user?id={sender_id}"
 
-    message_link = f"https://t.me/c/{chat.id}/{event.message.id}" if getattr(chat, 'id', None) else user_link
+    # تصحيح رابط الرسالة الأصلية ليعمل مع القروبات العامة والخاصة بدقة
+    if group_username:
+        message_link = f"https://t.me/{group_username}/{event.message.id}"
+    else:
+        chat_id_clean = str(chat.id).replace("-100", "")
+        message_link = f"https://t.me/c/{chat_id_clean}/{event.message.id}" if getattr(chat, 'id', None) else user_link
 
-       # رابط مباشر يفتح محادثة العميل ويضع الرسالة جاهزة في حقل الإرسال
+    # رابط مباشر يفتح محادثة العميل ويضع الرسالة جاهزة في حقل الإرسال
     auto_text_encoded = "السلام عليكم، حصلتم ولا لسا؟! إذا باقي أنا بتمم معاك"
     pm_shortcut_link = f"tg://msg?to={sender_id}&text={auto_text_encoded}"
 
-
-    # تنسيق احترافي ونظيف يعتمد على الروابط النصية المباشرة (يعمل بنسبة 100% في القنوات والخاص)
+    # تنسيق احترافي ونظيف يعتمد على الروابط النصية المباشرة
     notification_text = (
         f"🚗 **طلب مشوار جديد**\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
+        f"━━━━━━━━━━━━━\n"
         f"👤 **العميل:** {sender_name}\n"
         f"📍 **المصدر:** {group_title}\n\n"
         f"💬 **نص الطلب:**\n"
-        f"🟢> {text}\n\n"
+        f">🟢 {text}\n\n"
         f"🔗 **روابط سريعة للتفاعل:**\n"
         f"⚡ [إرسال رسالة جاهزة للعميل]({pm_shortcut_link})\n"
         f"💬 [محادثة العميل مباشرة]({user_link})\n"
