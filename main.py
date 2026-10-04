@@ -1,6 +1,7 @@
 import os
 import re
 import asyncio
+import html  # <-- المكتبة المسؤولة عن حماية النصوص وتجنب أخطاء الـ HTML
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.tl.types import User, Channel
@@ -140,23 +141,26 @@ async def handle_new_message(event):
     auto_text_encoded = "السلام عليكم، حصلتم ولا لسا؟! إذا باقي أنا بتمم معاك"
     pm_shortcut_link = f"tg://msg?to={sender_id}&text={auto_text_encoded}"
 
-    # تنسيق احترافي مع وضع نص الطلب داخل إطار مميز لتمييزه بصرياً
+    # حماية نص الطلب باستخدام html.escape لمنع أي أخطاء في الـ HTML
+    safe_text = html.escape(text)
+
+    # تنسيق احترافي مع الاقتباس الآمن
     notification_text = (
-        f"🚗 **طلب مشوار جديد**\n"
-        f"━━━━━━━━━━━━━━━━\n"
-        f"👤 **العميل:** {sender_name}\n"
-        f"📍 **المصدر:** {group_title}\n\n"
-        f"💬 **نص الطلب:**\n"
-        f"```{text}```\n\n"
-        f"🔗 **روابط سريعة للتفاعل:**\n"
-        f"⚡ [إرسال رسالة جاهزة للعميل]({pm_shortcut_link})\n"
-        f"💬 [محادثة العميل مباشرة]({user_link})\n"
-        f"👥 [فتح الرسالة الأصلية في القروب]({message_link})"
+        f"<b>🚗 طلب مشوار جديد</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"<b>👤 العميل:</b> {sender_name}\n"
+        f"<b>📍 المصدر:</b> {group_title}\n\n"
+        f"<b>💬 نص الطلب:</b>\n"
+        f"<blockquote>{safe_text}</blockquote>\n\n"
+        f"<b>🔗 روابط سريعة للتفاعل:</b>\n"
+        f"⚡ <a href='{pm_shortcut_link}'>إرسال رسالة جاهزة للعميل</a>\n"
+        f"💬 <a href='{user_link}'>محادثة العميل مباشرة</a>\n"
+        f"👥 <a href='{message_link}'>فتح الرسالة الأصلية في القروب</a>"
     )
 
     try:
         target_peer = int(TARGET_CHAT_ID) if TARGET_CHAT_ID.lstrip('-').isdigit() else TARGET_CHAT_ID
-        await client.send_message(target_peer, notification_text, link_preview=False, parse_mode='md')
+        await client.send_message(target_peer, notification_text, link_preview=False, parse_mode='html')
     except Exception as e:
         print(f"Error sending notification: {e}")
 
@@ -168,7 +172,7 @@ async def main():
             "a Telegram login is required."
         )
 
-    print("🚀 Userbot running stably with clean text links...", flush=True)
+    print("🚀 Userbot running stably and safely with HTML blockquotes...", flush=True)
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
