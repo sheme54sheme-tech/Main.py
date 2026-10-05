@@ -141,14 +141,14 @@ async def handle_new_message(event):
     auto_text_encoded = "السلام عليكم، حصلتم ولا لسا؟! إذا باقي أنا بتمم معاك"
     pm_shortcut_link = f"tg://msg?to={sender_id}&text={auto_text_encoded}"
 
-    # تنظيف النص وحمايته مع إضافة علامة اليمين (RTL Mark) لمجاراة المحاذاة الصحيحة
-    rtl_mark = "\u200F"
+    # مضاعفة علامة اليمين (RTL Marks) لضمان ثبات النص على اليمين داخل الاقتباس بدقة
+    rtl_mark = "\u200F\u200F"
     safe_text = html.escape(text)
 
-    # تنسيق احترافي مع مسافة كافية وواضحة بين كلمة "نص الطلب" وبداية الاقتباس
+    # تنسيق احترافي مع اقتباس يمين و مسافة واضحة
     notification_text = (
         f"<b>🚗 طلب مشوار جديد</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"<b>👤 العميل:</b> {sender_name}\n"
         f"<b>📍 المصدر:</b> {group_title}\n\n"
         f"<b>💬 نص الطلب:</b>\n\n"
@@ -173,7 +173,7 @@ async def main():
             "a Telegram login is required."
         )
 
-    print("🚀 Userbot running with optimized spacing and blockquotes...", flush=True)
+    print("🚀 Userbot running with strict RTL blockquotes...", flush=True)
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
