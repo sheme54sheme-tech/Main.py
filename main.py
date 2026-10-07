@@ -74,8 +74,6 @@ ALLOWED_GROUPS = [
     "jazandraivers007",
 ]
 
-# NOTE: the very common word "من" was removed: it matches almost every Arabic
-# sentence and caused false positives.
 CUSTOMER_INTENT_KEYWORDS = [
     r"\bابغى\b", r"\bابغا\b", r"\bابي\b", r"\bأبي\b", r"\bاحتاج\b", r"\bأحتاج\b",
     r"\bمطلوب\b", r"\bمحتاج\b", r"\bمين\b", r"\bاحد\b", r"\bأحد\b",
@@ -83,8 +81,6 @@ CUSTOMER_INTENT_KEYWORDS = [
     r"\bسيارة\b", r"\bسياره\b", r"\bمشوار\b", r"\bمشاوير\b", r"\bمندوب\b",
 ]
 
-# NOTE: the bare word "يوصل" was removed from this list: as a substring match it
-# also fired on driver ads such as "يوصلك". Specific phrases are safer.
 CUSTOMER_PHRASES = [
     "احد يوصل", "أحد يوصل", "احد يوصلني", "يوصلني", "يوصل لي", "محتاجه",
     "وصل لي", "ابي احد", "أبي احد", "ابي مندوب", "أبي مندوب", "ابغى مندوب",
@@ -115,38 +111,29 @@ def is_real_customer_request(text):
 
 
 # ---------------- Formatting helpers ----------------
-# Direction mark placed at the start of every line.
-#   "\u200F" = RLM (Right-to-Left Mark)
-#   "\u061C" = ALM (Arabic Letter Mark), treated as a strong Arabic letter and
-#              handled better by some Telegram clients. Switch with the env var.
 MARK_CHOICE = os.getenv("RTL_MARK", "ALM").upper()
 RLM = "\u061C" if MARK_CHOICE == "ALM" else "\u200F"
 
-# True  -> use Telegram's <blockquote> for the request text
-# False -> use plain lines prefixed with a bar, always right-aligned
 USE_BLOCKQUOTE = os.getenv("USE_BLOCKQUOTE", "1") == "1"
 
-FILLER = "\u2800"         # Invisible braille blank, used to widen the quote box
-QUOTE_MIN_WIDTH = 34      # Increase if the quote box is still narrow, 0 to disable
-SEPARATOR = "━" * 18      # Short enough to never wrap into a second line
-MAX_TEXT_LEN = 1500       # Keep the whole notification under Telegram's 4096 limit
+FILLER = "\u2800"
+QUOTE_MIN_WIDTH = 34
+SEPARATOR = "━" * 18
+MAX_TEXT_LEN = 1500
 AUTO_REPLY_TEXT = "السلام عليكم، حصلتم ولا لسا؟! إذا باقي أنا بتمم معاك"
 
-# Set to True temporarily to print what Telethon actually sends
 DEBUG_FORMAT = os.getenv("DEBUG_FORMAT", "0") == "1"
 
 
 def rtl(line=""):
-    """Prefix a line with the direction mark (empty lines stay empty)."""
     return f"{RLM}{line}" if line else ""
 
 
 # ---------------- Extra features: time / route / tags ----------------
-RIYADH_TZ = timezone(timedelta(hours=3))   # Saudi Arabia has no daylight saving
+RIYADH_TZ = timezone(timedelta(hours=3))
 
 
 def format_time(dt):
-    """Message time in Riyadh time, 12-hour format with ص/م."""
     if dt is None:
         return ""
     local = dt.astimezone(RIYADH_TZ)
@@ -155,11 +142,9 @@ def format_time(dt):
     return f"{hour12:02d}:{local.minute:02d} {suffix}"
 
 
-# "من X الى Y"  (also: إلى / لين / لـ attached to the destination)
 _ROUTE_RE = re.compile(
     r"من\s+(?P<a>[^\n،,.؟?]{2,30}?)\s+(?:(?:الى|إلى|لين)\s+|ل(?=[ء-ي]))(?P<b>[^\n،,.؟?]{2,30})"
 )
-# Words/numbers that mark the end of a place name (time, urgency, extra request)
 _ROUTE_STOP_RE = re.compile(
     r"\s+(?:الساعة|الان|الآن|الحين|بكرة|بكره|اليوم|الليلة|بعد|قبل|وابي|و\s?ابي|ابغى|ابي|ب\s?\d|السعر|بسعر)(?!\w)|\s+\d"
 )
@@ -171,7 +156,6 @@ def _clean_place(value):
 
 
 def extract_route(text):
-    """Best-effort 'from X to Y' extraction. Returns (origin, destination) or None."""
     for line in text.splitlines():
         m = _ROUTE_RE.search(line)
         if not m:
@@ -183,16 +167,16 @@ def extract_route(text):
     return None
 
 
-# ---- Tag rules: emoji -> words that trigger it ----
-# To add a new word: put it in the matching list.
-# To add a new tag: add a new (emoji, [words]) line to TAG_RULES.
-# Prefixes like ال / لل / ب / ل / و are handled automatically.
+# ---- تخصيص الكلمات والرموز بدقة لكل فئة ----
 URGENT_WORDS = ["عاجل", "ضروري", "مستعجل", "حالا", "حالاً", "الان", "الآن", "الحين", "بسرعة", "فورا", "فوراً"]
 AIRPORT_WORDS = ["مطار"]
 UNIVERSITY_WORDS = ["جامعة", "جامعه"]
-HOSPITAL_WORDS = ["مستشفى", "المستشفي "," المستوصف", "مستوصف"]
+HOSPITAL_WORDS = ["مستشفى", "المستشفي", "المستوصف", "مستوصف"]
 CAFE_WORDS = ["كوفي", "كوفيه", "كافيه", "كافي"]
-RESTAURANT_WORDS = ["مطعم", "المطعم", "بوفية", "بقالة", "البوفية", "البقالة", "مول", "المول", "سوق", "السوق", "بحر", "البحر"]
+RESTAURANT_WORDS = ["مطعم", "المطعم", "بوفية", "البوفية"]
+MARKET_WORDS = ["سوق", "السوق", "مول", "المول"]
+GROCERY_WORDS = ["بقالة", "البقالة", "سوبرماركت"]
+BEACH_WORDS = ["بحر", "البحر", "كورنيش", "الشاطئ", "شاطئ"]
 
 TAG_RULES = [
     ("🔥", URGENT_WORDS),
@@ -201,6 +185,9 @@ TAG_RULES = [
     ("🏥", HOSPITAL_WORDS),
     ("☕", CAFE_WORDS),
     ("🍽️", RESTAURANT_WORDS),
+    ("🛍️", MARKET_WORDS),
+    ("🛒", GROCERY_WORDS),
+    ("🌊", BEACH_WORDS),
 ]
 
 
@@ -214,7 +201,6 @@ def build_tags(text):
 
 
 def build_quote(text):
-    """Build the request text: every line RTL, escaped, optionally widened."""
     text = text.strip()
     if len(text) > MAX_TEXT_LEN:
         text = text[:MAX_TEXT_LEN] + "…"
@@ -245,7 +231,7 @@ def build_notification(sender_name, group_title, text, pm_link, user_link,
     if USE_BLOCKQUOTE:
         quote_part = f"<blockquote>{quote_part}</blockquote>"
 
-    title = "🚗 طلب مشوار جديد" + (f" {tags}" if tags else "")
+    title = "🚗 طلب مشوار جديد🚗" + (f" {tags}" if tags else "")
     lines = [
         rtl(f"<b>{title}</b>"),
         rtl(SEPARATOR),
@@ -300,7 +286,6 @@ async def handle_new_message(event):
     chat = await event.get_chat()
     group_username = (getattr(chat, 'username', '') or '').lower()
 
-    # Test group skips filtering for free testing
     if group_username != TEST_GROUP:
         if not is_real_customer_request(text):
             return
@@ -321,13 +306,10 @@ async def handle_new_message(event):
     group_title = getattr(chat, 'title', None) or 'قروب توصيل'
     username = getattr(sender, 'username', None)
 
-    # Links
     if username:
         user_link = f"https://t.me/{username}"
         pm_link = f"https://t.me/{username}?text={quote(AUTO_REPLY_TEXT)}"
     elif sender_id:
-        # Works only if this account already knows the user.
-        # "tg://msg?to=" is not a supported link, so no prefilled-message link here.
         user_link = f"tg://user?id={sender_id}"
         pm_link = None
     else:
@@ -362,7 +344,6 @@ async def handle_new_message(event):
 
 
 async def resolve_groups():
-    """Resolve groups one by one so a single bad username can't crash the bot."""
     ids = []
     for name in ALLOWED_GROUPS:
         try:
