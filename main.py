@@ -9,6 +9,7 @@ from urllib.parse import quote
 from dotenv import load_dotenv
 from telethon import TelegramClient, events, utils
 from telethon.tl.types import User, Channel
+from telethon.sessions import StringSession
 
 # ---- خادم الويب لإبقاء البوت حياً 24/7 (متوافق مع Render) ----
 from flask import Flask
@@ -54,7 +55,6 @@ TARGET_CHAT_ID = required_env("TELEGRAM_TARGET_CHAT_ID")
 STRING_SESSION = os.getenv("STRING_SESSION", "")
 
 # استخدام StringSession لتفادي مشاكل الحظر وجلسات الحساب
-from telethon.sessions import StringSession
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
 
 TEST_GROUP = "testorders1"
@@ -222,11 +222,31 @@ def build_quote(text):
     if len(text) > MAX_TEXT_LEN:
         text = text[:MAX_TEXT_LEN] + "…"
     
-    # تنظيف النص من اكواد HTML الضارة لضمان الامان
+    # تنظيف النص من أى أكواد تضر HTML
     safe_text = html.escape(text)
     
     if USE_BLOCKQUOTE:
-        # استخدام وسوم HTML الخاصة والاقتباس المعتمدة في تيليجرام
         return f"<blockquote>{safe_text}</blockquote>"
     else:
         return f"<code>{safe_text}</code>"
+
+
+# ---------------- التشغيل الرئيسي للبوت وخادم الويب ----------------
+if __name__ == '__main__':
+    def start_telegram_bot():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            print("Starting Telegram Userbot...")
+            client.start()
+            client.run_until_disconnected()
+        except Exception as e:
+            print(f"Telegram Bot Error: {e}")
+
+    # بدء تشغيل البوت في Thread خلفي
+    bot_thread = Thread(target=start_telegram_bot, daemon=True)
+    bot_thread.start()
+
+    # تشغيل خادم Flask (الخيط الرئيسي لضمان فتح المنفذ على Render)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
