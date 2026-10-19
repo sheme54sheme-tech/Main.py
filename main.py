@@ -115,25 +115,20 @@ def extract_destination(text):
 def is_real_customer_request(text):
     text_clean = text.lower().strip()
 
-    # 1. حظر حاسم لأي رسالة تحتوي على معرف تلجرام (@username)
     if re.search(r'@[a-zA-Z0-9_]+', text_clean):
         return False
 
-    # 2. حظر حاسم لأي رسالة تحتوي على رقم جوال (05x أو +9665x أو 9665x)
     if re.search(r'(?:05|\+?9665)\d{8}', text_clean):
         return False
 
-    # 3. استبعاد العبارات الصريحة لإعلانات السائقين والمناديب
     for exclude_term in DRIVER_EXCLUDE_KEYWORDS:
         if exclude_term in text_clean:
             return False
 
-    # 4. قبول الطلب إذا احتوى على عبارات العملاء المتداولة
     for phrase in CUSTOMER_PHRASES:
         if phrase in text_clean:
             return True
 
-    # 5. قبول الطلب إذا احتوى على كلمة مفتاحية تعبر عن نية ورغبة العميل
     has_intent = any(re.search(kw, text_clean) for kw in CUSTOMER_INTENT_KEYWORDS)
     if has_intent:
         return True
@@ -172,18 +167,20 @@ async def handle_new_message(event):
 
     message_link = f"https://t.me/c/{chat.id}/{event.message.id}" if getattr(chat, 'id', None) else ""
 
+    # تنسيق الإشعار المطابق تماماً لما كان يعمل في الصورة السابقة
     notification_text = (
-        f"🚖 **طلب مشوار إلى {destination}**\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🚗 **طلب مشوار جديد** ☕\n"
+        f"──────────────────\n\n"
         f"👤 **العميل:** [{sender_name}]({user_link})\n"
         f"📍 **المصدر:** {group_title}\n\n"
-        f"💬 **نص الطلب:**\n"
-        f"> {text}\n"
+        f"📝 **نص الطلب:**\n"
+        f"> {text}\n\n"
+        f"🔗 **روابط سريعة للتفاعل:**"
     )
 
     buttons = [
-        [Button.inline("⚡ إرسال رسالة آلياً للعميل", data=f"send_pm:{sender_id}")],
-        [Button.url("💬 فتح محادثة العميل", user_link)]
+        [Button.inline("⚡ إرسال رسالة جاهزة للعميل", data=f"send_pm:{sender_id}")],
+        [Button.url("💬 محادثة العميل مباشرة", user_link)]
     ]
     if message_link:
         buttons.append([Button.url("👥 فتح الرسالة في القروب", message_link)])
@@ -205,20 +202,22 @@ async def handle_auto_reply_click(event):
     )
 
     try:
+        # إرسال الرسالة الخاصة للعميل مباشرة
         await client.send_message(user_id, natural_message)
-        await event.answer("✅ تم إرسال الرسالة بنجاح!", alert=True)
+        await event.answer("✅ تم إرسال الرسالة بنجاح للعميل!", alert=True)
 
+        # تحديث أزرار الإشعار بعد الإرسال
         await event.edit(buttons=[
             [Button.inline("✅ تم التواصل مع العميل", data="done")],
-            [Button.url("💬 فتح محادثة العميل", f"tg://user?id={user_id}")]
+            [Button.url("💬 محادثة العميل مباشرة", f"tg://user?id={user_id}")]
         ])
     except Exception as e:
-        await event.answer(f"❌ تعذر الإرسال بسبب الخصوصية: {e}", alert=True)
+        await event.answer(f"❌ تعذر الإرسال (قد يكون العميل قام بتقييد الرسائل الخاصة): {e}", alert=True)
 
 async def main():
     await client.start()
     print(
-        "🚀 Userbot running and monitoring all specified groups successfully...",
+        "🚀 Userbot running with full interactive buttons and group monitoring...",
         flush=True,
     )
     await client.run_until_disconnected()
