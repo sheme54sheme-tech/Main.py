@@ -134,8 +134,6 @@ RLM = "\u061C" if MARK_CHOICE == "ALM" else "\u200F"
 
 USE_BLOCKQUOTE = os.getenv("USE_BLOCKQUOTE", "1") == "1"
 
-FILLER = "\u2800"
-QUOTE_MIN_WIDTH = 34
 SEPARATOR = "━" * 18
 MAX_TEXT_LEN = 1500
 AUTO_REPLY_TEXT = "السلام عليكم، حصلتم ولا لسا؟! إذا باقي أنا بتمم معاك"
@@ -234,44 +232,78 @@ def build_quote(text):
 async def handle_new_message(event):
     message_text = event.raw_text
     
-    # فحص ما إذا كان الطلب حقيقياً وصادراً عن عميل
+    # فحص صحة الطلب
     if not is_real_customer_request(message_text):
         return
 
-    # استخراج مسار الرحلة (من وإلى)
+    # استخراج المسار
     route = extract_route(message_text)
     route_text = ""
     if route:
         origin, destination = route
-        route_text = f"\n{SEPARATOR}\n📍 من: {origin}\n🏁 إلى: {destination}"
+        route_text = f"\n📍 <b>من:</b> {origin}\n🏁 <b>إلى:</b> {destination}"
 
     tags = build_tags(message_text)
     req_time = format_time(event.date)
     quote_text = build_quote(message_text)
     
     chat = await event.get_chat()
+    sender = await event.get_sender()
+    
     chat_title = getattr(chat, 'title', 'قروب عام')
     
-    # إنشاء رابط تفاعلي للرسالة الأصلية
-    message_link = f"https://t.me/{chat.username}/{event.id}" if getattr(chat, 'username', None) else ""
+    # تفاصيل العميل
+    sender_name = "عميل"
+    if sender:
+        first = getattr(sender, 'first_name', '') or ''
+        last = getattr(sender, 'last_name', '') or ''
+        sender_name = html.escape(f"{first} {last}".strip() or "عميل")
     
-    # بناء هيكل الرسالة النهائية المرسلة لدردشة التوجيه
+    # روابط التواصل التفاعلية
+    direct_chat_link = ""
+    auto_reply_link = ""
+    
+    encoded_reply = quote(AUTO_REPLY_TEXT)
+    
+    if sender and getattr(sender, 'username', None):
+        username = sender.username
+        direct_chat_link = f"https://t.me/{username}"
+        auto_reply_link = f"https://t.me/{username}?text={encoded_reply}"
+    elif sender:
+        direct_chat_link = f"tg://user?id={sender.id}"
+        auto_reply_link = f"tg://user?id={sender.id}"
+
+    # رابط الرسالة الأصلية بالقروب
+    message_link = ""
+    if getattr(chat, 'username', None):
+        message_link = f"https://t.me/{chat.username}/{event.id}"
+    
+    # قالب الرسالة المنسق والمطور
     final_message = (
-        f"{rtl(f'🚨 طلب جديد {tags}')}\n"
-        f"{rtl(f'⏰ الوقت: {req_time}')}\n"
-        f"{rtl(f'👥 المصدر: {chat_title}')}\n"
-        f"{quote_text}"
-        f"{route_text}"
+        f"🚗 <b>طلب مشوار جديد</b> {tags}\n"
+        f"──────────────────\n"
+        f"👤 <b>العميل:</b> {sender_name}\n"
+        f"📍 <b>المصدر:</b> {html.escape(chat_title)}\n"
+        f"⏰ <b>الوقت:</b> {req_time}\n"
+        f"{route_text}\n\n"
+        f"📝 <b>نص الطلب:</b>\n"
+        f"{quote_text}\n\n"
+        f"🔗 <b>روابط السريعة للتفاعل:</b>\n"
     )
-    
+
+    if direct_chat_link:
+        final_message += f"💬 <a href='{direct_chat_link}'>محادثة العميل مباشرة</a>\n"
+    if auto_reply_link:
+        final_message += f"📩 <a href='{auto_reply_link}'>إرسال رد جاهز للعميل</a>\n"
     if message_link:
-        final_message += f"\n\n🔗 <a href='{message_link}'>رابط الرسالة الأصلية</a>"
+        final_message += f"👁️ <a href='{message_link}'>عرض الرسالة في القروب الأصلي</a>\n"
 
     try:
         await client.send_message(
             int(TARGET_CHAT_ID) if TARGET_CHAT_ID.lstrip('-').isdigit() else TARGET_CHAT_ID,
             final_message,
-            parse_mode='html'
+            parse_mode='html',
+            link_preview=False
         )
     except Exception as e:
         logging.error(f"Failed to forward message: {e}")
@@ -279,7 +311,6 @@ async def handle_new_message(event):
 
 # ---------------- التشغيل الرئيسي للبوت وخادم الويب ----------------
 if __name__ == '__main__':
-    # تشغيل خادم الويب لأجل Render في الخلفية
     keep_alive()
     
     try:
