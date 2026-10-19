@@ -217,12 +217,10 @@ def build_tags(text):
 
 
 def build_quote(text):
-    """بناء نص الاقتباس باستخدام وسوم HTML ليدعم خاصية Blockquote في تيليجرام"""
     text = text.strip()
     if len(text) > MAX_TEXT_LEN:
         text = text[:MAX_TEXT_LEN] + "…"
     
-    # تنظيف النص من أى أكواد تضر HTML
     safe_text = html.escape(text)
     
     if USE_BLOCKQUOTE:
@@ -231,22 +229,62 @@ def build_quote(text):
         return f"<code>{safe_text}</code>"
 
 
+# ---------------- معالجة الرسائل واستماع الأحداث ----------------
+@client.on(events.NewMessage(chats=ALLOWED_GROUPS))
+async def handle_new_message(event):
+    message_text = event.raw_text
+    
+    # فحص ما إذا كان الطلب حقيقياً وصادراً عن عميل
+    if not is_real_customer_request(message_text):
+        return
+
+    # استخراج مسار الرحلة (من وإلى)
+    route = extract_route(message_text)
+    route_text = ""
+    if route:
+        origin, destination = route
+        route_text = f"\n{SEPARATOR}\n📍 من: {origin}\n🏁 إلى: {destination}"
+
+    tags = build_tags(message_text)
+    req_time = format_time(event.date)
+    quote_text = build_quote(message_text)
+    
+    chat = await event.get_chat()
+    chat_title = getattr(chat, 'title', 'قروب عام')
+    
+    # إنشاء رابط تفاعلي للرسالة الأصلية
+    message_link = f"https://t.me/{chat.username}/{event.id}" if getattr(chat, 'username', None) else ""
+    
+    # بناء هيكل الرسالة النهائية المرسلة لدردشة التوجيه
+    final_message = (
+        f"{rtl(f'🚨 طلب جديد {tags}')}\n"
+        f"{rtl(f'⏰ الوقت: {req_time}')}\n"
+        f"{rtl(f'👥 المصدر: {chat_title}')}\n"
+        f"{quote_text}"
+        f"{route_text}"
+    )
+    
+    if message_link:
+        final_message += f"\n\n🔗 <a href='{message_link}'>رابط الرسالة الأصلية</a>"
+
+    try:
+        await client.send_message(
+            int(TARGET_CHAT_ID) if TARGET_CHAT_ID.lstrip('-').isdigit() else TARGET_CHAT_ID,
+            final_message,
+            parse_mode='html'
+        )
+    except Exception as e:
+        logging.error(f"Failed to forward message: {e}")
+
+
 # ---------------- التشغيل الرئيسي للبوت وخادم الويب ----------------
 if __name__ == '__main__':
-    def start_telegram_bot():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            print("Starting Telegram Userbot...")
-            client.start()
-            client.run_until_disconnected()
-        except Exception as e:
-            print(f"Telegram Bot Error: {e}")
-
-    # بدء تشغيل البوت في Thread خلفي
-    bot_thread = Thread(target=start_telegram_bot, daemon=True)
-    bot_thread.start()
-
-    # تشغيل خادم Flask (الخيط الرئيسي لضمان فتح المنفذ على Render)
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    # تشغيل خادم الويب لأجل Render في الخلفية
+    keep_alive()
+    
+    try:
+        print("Starting Telegram Userbot...")
+        client.start()
+        client.run_until_disconnected()
+    except Exception as e:
+        print(f"Telegram Bot Error: {e}")
