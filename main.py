@@ -92,58 +92,303 @@ ALLOWED_GROUPS = [
     "DarbSamtah"
 ]
 
-CUSTOMER_INTENT_KEYWORDS = [
-    r"\bابغى\b", r"\bابغا\b", r"\bابي\b", r"\bأبي\b", r"\bاحتاج\b", r"\bأحتاج\b",
-    r"\bمطلوب\b", r"\bمحتاج\b", r"\bمين\b", r"\bاحد\b", r"\bأحد\b",
-    r"\bفاضي\b", r"\bفاطي\b", r"\bتوصيله\b", r"\bتوصيلة\b", r"\bتوصيل\b",
-    r"\bسيارة\b", r"\bسياره\b", r"\bمشوار\b", r"\bمشاوير\b", r"\bمندوب\b",
-]
 
-CUSTOMER_PHRASES = [
-    "احد يوصل", "أحد يوصل", "احد يوصلني", "يوصلني", "يوصل لي", "محتاجه",
-    "وصل لي", "ابي احد", "أبي احد", "ابي مندوب", "أبي مندوب", "ابغى مندوب",
-    "ابغا مندوب", "محتاج مندوب", "مين فاضي", "من فاضي", "من يوصل", "مين يوصل",
-    "مين يوصلني", "محتاجة", "ابي مشوار", "ابغى مشوار", "ابغى سواق", "يوصل"
-]
-
-DRIVER_EXCLUDE_KEYWORDS = [
-    "يوجد لدينا", "لدينا توصيل", "خدمات توصيل", "شهري", "دوام شهري", "نوفر لكم",
-    "متاح الان", "متاح الآن", "متواجد في", "متواجد الان", "مندوب صامطة", "مندوب جازان",
-    "نوصل", "نقدم خدمة", "للتواصل واتس", "عبر الواتس", "على الواتس",
-]
-
-
-def is_real_customer_request(text):
-    text_clean = text.lower().strip()
-    if re.search(r'@[a-zA-Z0-9_]+', text_clean):
-        return False
-    if re.search(r'(?:05|\+?9665)\d{8}', text_clean):
-        return False
-    for exclude_term in DRIVER_EXCLUDE_KEYWORDS:
-        if exclude_term in text_clean:
-            return False
-    for phrase in CUSTOMER_PHRASES:
-        if phrase in text_clean:
-            return True
-    return any(re.search(kw, text_clean) for kw in CUSTOMER_INTENT_KEYWORDS)
-
-
-# ---------------- منع تكرار الطلب في عدة قروبات ----------------
-DEDUP_WINDOW = int(os.getenv("DEDUP_WINDOW_SECONDS", "1800"))  # 30 دقيقة
-
-_recent_requests = {}  # fingerprint -> آخر وقت ظهور (time.monotonic)
-
+# ======================================================================
+#  أدوات تطبيع النص العربي (تُستخدم في الكشف وفي منع التكرار)
+# ======================================================================
 _DIACRITICS_RE = re.compile(r"[\u0610-\u061A\u064B-\u065F\u0670\u0640]")
 _NON_WORD_RE = re.compile(r"[^\w\s]", re.UNICODE)
+_DIGITS_TABLE = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+
+
+def _letters(text):
+    """توحيد الحروف: التشكيل، الهمزات، ة/ه، ى/ي، الأرقام، وتكرار الحروف (ابغااا -> ابغا)."""
+    text = text.lower().translate(_DIGITS_TABLE)
+    text = _DIACRITICS_RE.sub("", text)
+    text = re.sub(r"[أإآٱ]", "ا", text)
+    text = (text.replace("ة", "ه").replace("ى", "ي")
+                .replace("ئ", "ي").replace("ؤ", "و"))
+    return re.sub(r"(.)\1{2,}", r"\1", text)
 
 
 def normalize_text(text):
-    text = text.lower()
-    text = _DIACRITICS_RE.sub("", text)
-    text = re.sub(r"[أإآٱ]", "ا", text)
-    text = text.replace("ة", "ه").replace("ى", "ي")
-    text = _NON_WORD_RE.sub(" ", text)
+    text = _NON_WORD_RE.sub(" ", _letters(text))
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _kw(words, prefix=True, suffix=False):
+    """
+    يبني تعبيراً نمطياً من قائمة كلمات (تُطبَّع تلقائياً).
+    prefix: يسمح بالسوابق (و، ف، ال، لل، ل، ب)  مثل: للمطار، بالسيارة، وابي
+    suffix: يسمح بلواحق (يوصل -> يوصلني، يوصلنا ...)
+    """
+    alts = "|".join(
+        re.escape(_letters(w)) for w in sorted(set(words), key=len, reverse=True)
+    )
+    pre = r"(?:و|ف)?(?:ال|لل|ل|ب)?" if prefix else ""
+    suf = r"\w*" if suffix else ""
+    return rf"(?<!\w){pre}(?:{alts}){suf}(?!\w)"
+
+
+# ======================================================================
+#  كشف طلبات العملاء الحقيقية (نظام نقاط)
+#  عدّل القوائم أدناه بحرية؛ كل الكلمات تُطبَّع تلقائياً (أ/ا، ة/ه، ى/ي ...)
+# ======================================================================
+DETECTION_DEBUG = os.getenv("DETECTION_DEBUG", "0") == "1"
+MIN_REQUEST_SCORE = int(os.getenv("MIN_REQUEST_SCORE", "4"))
+
+# ---- عبارات الطلب: "أبي / أبغى / محتاج ..." ----
+ASK_WORDS = [
+    "ابي", "ابغى", "ابغا", "ابا", "ابى", "ابغاه", "ابغاها", "ابيه", "بغيت", "ابغيت",
+    "احتاج", "احتاجها", "محتاج", "محتاجه", "محتاجين", "نحتاج",
+    "نبغى", "نبي", "نبغا", "ودي", "وددت", "اريد", "نريد", "مطلوب",
+]
+
+# ---- أسماء الخدمة (مفرد) ----
+SERVICE_WORDS = [
+    "توصيل", "توصيله", "مشوار", "سواق", "سائق", "سايق", "كابتن", "مندوب",
+    "سياره", "تكسي", "تاكسي", "ليموزين", "وانيت", "ونيت", "شاحنه", "دباب",
+    "دينا", "نقل", "رحله",
+]
+
+# ---- أفعال الذهاب بعد "ابي": ابي اروح / ابغى اوصل ----
+GO_VERBS = ["اروح", "اوصل", "اسافر", "اطلع", "انزل", "اذهب", "ارجع", "اجي", "اودي", "اوديه"]
+
+# ---- أدوات السؤال العام: مين / احد / فيه احد ----
+QUESTION_WORDS = [
+    "مين", "منو", "منهو", "احد", "حد", "اي واحد", "اي حد",
+    "فيه احد", "في احد", "فيه حد", "في حد",
+]
+
+# ---- ما يأتي بعد أداة السؤال: مين فاضي / احد يوصلني / مين يجيب لي ----
+WHO_ACTIONS = [
+    "يوصل", "فاضي", "فاضيه", "متاح", "متفرغ", "يقدر", "يروح",
+    "يجيب", "يشتري", "يشيل", "يودي", "يوديني", "يودينا", "ياخذني", "ياخذنا",
+    "ينقل", "متوفر", "موجود",
+    "سايق", "سواق", "كابتن", "مندوب", "سياره", "تكسي", "ونيت", "وانيت",
+    "شاحنه", "دباب", "مشوار", "توصيله", "توصيل",
+]
+
+# ---- عبارات قوية وحدها تكفي (بصيغة المتكلم/المخاطب لطلب خدمة) ----
+STRONG_PHRASES = [
+    "يوصلني", "يوصلنا", "يوصل لي", "يوصل لنا", "وصلني", "وصلوني",
+    "يوديني", "يودينا", "ياخذني", "ياخذنا", "يجيب لي", "يشتري لي",
+    "يجيبلي", "يشتريلي", "ابي واحد", "ابغى واحد", "ابغا واحد", "محتاج واحد",
+    "ابي احد", "ابغى احد", "ابغا احد",
+]
+
+# ---- إشارات مساعدة (كل منها نقطة واحدة) ----
+TIME_WORDS = [
+    "الساعه", "الحين", "الان", "حاليا", "فورا", "حالا", "عاجل", "ضروري", "مستعجل", "بسرعه",
+    "بكره", "بكرا", "اليوم", "الليله", "الفجر", "الصبح", "صباحا", "مساء",
+    "الظهر", "العصر", "المغرب", "العشاء",
+]
+PRICE_WORDS = ["كم", "بكم", "بكام", "سعر", "السعر", "اجره", "الاجره", "الحساب", "تكلفه", "التكلفه"]
+PASSENGER_CARGO_WORDS = [
+    "شخص", "اشخاص", "شخصين", "راكب", "ركاب", "راكبين", "عائله", "عيله", "اسره",
+    "حريم", "نساء", "بنات", "بنت", "اطفال", "طفل", "شنطه", "شنط", "عفش", "اثاث",
+    "طرد", "طرود", "شحنه", "غرض", "اغراض", "طلبيه", "بضاعه", "مستندات", "اوراق",
+]
+PLACE_WORDS = [
+    "مطار", "جامعه", "كليه", "مستشفي", "مستوصف", "مركز صحي", "سوق", "مول", "كورنيش",
+    "شاطي", "محطه", "ميناء", "فندق", "مطعم", "كوفي", "كافيه", "بقاله", "صيدليه",
+    "مدرسه", "الحدود", "بيت", "شقه", "محكمه",
+]
+CITY_WORDS = [
+    "جازان", "جيزان", "صبيا", "صامطه", "ابو عريش", "ابوعريش", "المسارحه", "احد المسارحه",
+    "فيفا", "ضمد", "بيش", "العارضه", "الدرب", "الريث", "فرسان", "الحرث", "العيدابي",
+    "هروب", "الطوال", "ام الخشب", "الخوبه", "الشقيق", "القفل", "القوز",
+    "ابها", "خميس مشيط", "نجران", "جده", "مكه", "الرياض", "الطايف", "الباحه",
+]
+
+# ---- كلمات ترفض الرسالة مباشرة (إعلانات / عروض / مناديب) ----
+AD_STEM_WORDS = [   # أفعال بصيغة "نحن": نوصل، نوفر، نقدم ...
+    "نوصل", "نوفر", "نقدم", "نخدم", "نستقبل", "نلبي", "نضمن", "خدماتن", "خدمتن",
+]
+AD_PHRASES = [
+    "لدينا", "تواصل معنا", "للتواصل", "للحجز", "للاستفسار", "للطلب",
+    "واتس", "واتساب", "وتساب", "whatsapp", "تحت امركم", "بخدمتكم", "في خدمتكم",
+    "اسعارنا", "اسعار مناسبه", "اسعار مميزه", "اسعار منافسه",
+    "عروض", "عرض خاص", "خصم", "خصومات", "اشتراك", "اشتراكات", "شهري", "دوام شهري",
+    "24 ساعه", "على مدار الساعه", "اعلان", "للايجار", "للبيع", "ايجار",
+    "توظيف", "وظيفه", "وظايف", "سجل معنا", "رابط التسجيل", "تابعونا", "قناتنا",
+    "مضمون", "جميع الاحياء", "كل الاحياء", "داخل وخارج", "مشاويركم",
+]
+
+# ---- كلمات تخفض النقاط إن لم يوجد طلب صريح (غالباً عرض من سائق) ----
+AD_WEAK_WORDS = [
+    "متاح", "متوفر", "متواجد", "جاهز", "جاهزين", "موجود", "حياكم", "حياك", "يسعدنا",
+]
+# ---- صيغ الجمع غالباً إعلانات: "مشاوير داخل جازان" ----
+PLURAL_AD_WORDS = [
+    "مشاوير", "توصيلات", "مناديب", "مندوبين", "سواقين", "سايقين", "سيارات", "كباتن", "رحلات",
+]
+
+# ---- إعلانات التوظيف: "مطلوب سائق براتب ..." ----
+JOB_HEAD_WORDS = ["مطلوب", "مطلوبين", "نطلب", "نحتاج", "وظيفه"]
+JOB_ROLE_WORDS = [
+    "سائق", "سايق", "سواق", "مندوب", "كابتن", "موظف", "عامل",
+    "سائقين", "سواقين", "مناديب", "مندوبين", "كباتن", "موظفين",
+]
+JOB_QUALIFIER_WORDS = [
+    "راتب", "براتب", "دوام", "توظيف", "وظيفه", "للعمل", "عمل معنا", "شركه", "مؤسسه",
+    "عقد", "مزايا", "تامين", "سكن", "خبره",
+]
+
+# ----------------------- التعابير النمطية المبنية -----------------------
+_ASK = _kw(ASK_WORDS)
+_SERVICE = _kw(SERVICE_WORDS)
+
+ASK_RE = re.compile(_ASK)
+SERVICE_RE = re.compile(_SERVICE)
+ASK_SERVICE_RE = re.compile(rf"{_ASK}\s+(?:\S+\s+){{0,3}}?{_SERVICE}")
+ASK_GO_RE = re.compile(rf"{_ASK}\s+(?:\S+\s+)?{_kw(GO_VERBS, prefix=False)}")
+WHO_RE = re.compile(
+    rf"{_kw(QUESTION_WORDS, prefix=False)}\s+(?:\S+\s+){{0,2}}?{_kw(WHO_ACTIONS, suffix=True)}"
+)
+WHO_FROM_RE = re.compile(
+    rf"(?<!\w)من\s+{_kw(['يوصل', 'فاضي', 'متاح', 'يقدر', 'يروح', 'يجيب', 'يشتري', 'يودي', 'عنده', 'متفرغ'], prefix=False, suffix=True)}"
+)
+# الترتيب المعكوس: "فاضي احد؟" / "متاح مين؟"
+WHO_REV_RE = re.compile(
+    rf"{_kw(['فاضي', 'فاضيه', 'متاح', 'متفرغ'], prefix=False)}\s+{_kw(['احد', 'حد', 'مين'], prefix=False)}"
+)
+STRONG_RE = re.compile(_kw(STRONG_PHRASES, prefix=False))
+
+ROUTE_RE_N = re.compile(r"(?<!\w)من\s+\S+(?:\s+\S+){0,3}?\s+(?:الي|لين|ل\S{2,})")
+DEST_RE_N = re.compile(r"(?<!\w)(?:الي|لين|لحد)\s+\S{2,}")
+TIME_RE = re.compile(
+    _kw(TIME_WORDS, prefix=False) + r"|(?<!\w)بعد\s+(?:\d+|ساعه|ساعتين|نص|ربع)"
+)
+PRICE_RE = re.compile(_kw(PRICE_WORDS, prefix=False))
+PASSENGER_RE = re.compile(_kw(PASSENGER_CARGO_WORDS))
+PLACE_RE = re.compile(_kw(PLACE_WORDS + CITY_WORDS))
+
+AD_STEM_RE = re.compile(_kw(AD_STEM_WORDS, prefix=False, suffix=True))
+AD_PHRASE_RE = re.compile(_kw(AD_PHRASES, prefix=False))
+AD_WEAK_RE = re.compile(_kw(AD_WEAK_WORDS))
+PLURAL_AD_RE = re.compile(_kw(PLURAL_AD_WORDS))
+
+# سائق يعرّف بنفسه: "انا مندوب" / "انا فاضي"
+DRIVER_SELF_RE = re.compile(
+    rf"(?<!\w)(?:انا|اني|احنا)\s+{_kw(['مندوب', 'سواق', 'سايق', 'سائق', 'كابتن', 'متاح', 'فاضي', 'متواجد', 'جاهز', 'موجود'], prefix=True, suffix=True)}"
+)
+# سائق يستجلب زبائن: "مين يبي مشوار" / "تبي توصيلة"
+DRIVER_SOLICIT_RE = re.compile(
+    r"(?<!\w)مين\s+(?:يبي|يبغي|يبغا|يحتاج|يريد|محتاج|ودها)\w*"
+)
+DRIVER_SECOND_PERSON_RE = re.compile(
+    r"(?<!\w)(?:تبي|تبغي|تبغا|تبون|تبغون|تحتاج|تحتاجون)\s+(?:\S+\s+){0,2}?"
+    + _kw(["مشوار", "توصيله", "توصيل", "سياره", "مندوب", "سواق", "سايق"])
+)
+JOB_RE = re.compile(rf"{_kw(JOB_HEAD_WORDS)}\s+(?:\S+\s+)?{_kw(JOB_ROLE_WORDS)}")
+JOB_QUALIFIER_RE = re.compile(_kw(JOB_QUALIFIER_WORDS))
+
+_LINK_RE = re.compile(r"@[A-Za-z0-9_]{3,}|t\.me/|https?://|www\.", re.IGNORECASE)
+_EMOJI_RE = re.compile("[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B50]")
+
+_HARD_REJECTS = [
+    ("ad-stem", AD_STEM_RE),
+    ("ad-phrase", AD_PHRASE_RE),
+    ("driver-self", DRIVER_SELF_RE),
+    ("driver-solicit", DRIVER_SOLICIT_RE),
+    ("driver-second-person", DRIVER_SECOND_PERSON_RE),
+]
+
+
+def _has_phone(text):
+    t = text.translate(_DIGITS_TABLE)
+    t = re.sub(r"(?<=\d)[\s\-.]+(?=\d)", "", t)  # 055 123 4567 -> 0551234567
+    return re.search(r"(?<!\d)(?:\+?966|00966|0)?5\d{8}(?!\d)", t) is not None
+
+
+def classify_request(text):
+    """
+    يرجع (هل هو طلب عميل حقيقي؟, النقاط, أسباب القرار)
+    """
+    raw = text or ""
+    norm = normalize_text(raw)
+    if not norm:
+        return False, 0, ["empty"]
+
+    # ---- رفض مباشر ----
+    if _LINK_RE.search(raw):
+        return False, 0, ["reject:link-or-handle"]
+    for label, rx in _HARD_REJECTS:
+        if rx.search(norm):
+            return False, 0, [f"reject:{label}"]
+    if JOB_RE.search(norm) and JOB_QUALIFIER_RE.search(norm):
+        return False, 0, ["reject:job-ad"]
+
+    # ---- حساب النقاط ----
+    score = 0
+    reasons = []
+
+    def add(points, label):
+        nonlocal score
+        score += points
+        reasons.append(f"{points:+d} {label}")
+
+    has_ask = bool(ASK_RE.search(norm))
+    has_strong = bool(STRONG_RE.search(norm))
+    has_who = bool(
+        WHO_RE.search(norm) or WHO_FROM_RE.search(norm) or WHO_REV_RE.search(norm)
+    )
+
+    if has_strong:
+        add(4, "strong-phrase")
+    if has_who:
+        add(4, "who-asks")
+    if ASK_SERVICE_RE.search(norm):
+        add(4, "ask+service")
+    if ASK_GO_RE.search(norm):
+        add(3, "ask+go")
+    if has_ask:
+        add(1, "ask")
+    if SERVICE_RE.search(norm):
+        add(1, "service")
+
+    if ROUTE_RE_N.search(norm):
+        add(2, "route")
+    elif DEST_RE_N.search(norm):
+        add(1, "destination")
+    if PLACE_RE.search(norm):
+        add(1, "place")
+    if TIME_RE.search(norm):
+        add(1, "time")
+    if PRICE_RE.search(norm):
+        add(1, "price")
+    if PASSENGER_RE.search(norm):
+        add(1, "passengers/cargo")
+
+    # ---- خصم نقاط ----
+    if not (has_ask or has_who or has_strong) and AD_WEAK_RE.search(norm):
+        add(-3, "availability-wording")
+    if PLURAL_AD_RE.search(norm):
+        add(-2, "plural-ad-wording")
+    if _has_phone(raw):
+        add(-2, "phone-number")
+    if len(_EMOJI_RE.findall(raw)) >= 6:
+        add(-2, "emoji-heavy")
+    if len(norm) > 400:
+        add(-3, "too-long")
+
+    return score >= MIN_REQUEST_SCORE, score, reasons
+
+
+def is_real_customer_request(text):
+    ok, score, reasons = classify_request(text)
+    if DETECTION_DEBUG:
+        logging.info(f"[detect] ok={ok} score={score} reasons={reasons} text={text[:80]!r}")
+    return ok
+
+
+# ======================================================================
+#  منع تكرار الطلب في عدة قروبات
+# ======================================================================
+DEDUP_WINDOW = int(os.getenv("DEDUP_WINDOW_SECONDS", "1800"))  # 30 دقيقة
+
+_recent_requests = {}  # fingerprint -> آخر وقت ظهور (time.monotonic)
 
 
 def make_fingerprint(sender_id, text):
@@ -277,7 +522,7 @@ def build_quote(text):
 async def handle_new_message(event):
     message_text = event.raw_text
 
-    # فحص صحة الطلب
+    # فحص صحة الطلب (نظام النقاط)
     if not is_real_customer_request(message_text):
         return
 
