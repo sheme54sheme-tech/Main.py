@@ -12,9 +12,6 @@ from telethon import TelegramClient, events, utils
 from telethon.tl.types import User, Channel
 from telethon.sessions import StringSession
 
-# مكتبة للاتصال بالذكاء الاصطناعي (خفيفة وسريعة)
-import openai
-
 # ---- خادم الويب لإبقاء البوت حياً 24/7 (متوافق مع Render) ----
 from flask import Flask
 from threading import Thread
@@ -57,16 +54,6 @@ except ValueError as error:
 API_HASH = required_env("TELEGRAM_API_HASH")
 TARGET_CHAT_ID = required_env("TELEGRAM_TARGET_CHAT_ID")
 STRING_SESSION = os.getenv("STRING_SESSION", "")
-
-# إعداد مفتاح الذكاء الاصطناعي (يدعم OpenAI, Groq, DeepSeek وغيرها المتوافقة مع OpenAI)
-AI_API_KEY = os.getenv("AI_API_KEY", "")
-AI_BASE_URL = os.getenv("AI_BASE_URL", "https://api.openai.v1") # يمكن تغييره لـ Groq أو غيره
-USE_AI_FILTER = os.getenv("USE_AI_FILTER", "0") == "1" # تفعيل/تعطيل الذكاء الاصطناعي عبر المتغيرات
-
-if AI_API_KEY:
-    openai.api_key = AI_API_KEY
-    if AI_BASE_URL and "openai.com" not in AI_BASE_URL:
-        openai.api_base = AI_BASE_URL
 
 # استخدام StringSession لتفادي مشاكل الحظر وجلسات الحساب
 client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
@@ -135,11 +122,11 @@ def _kw(words, prefix=True, suffix=False):
     )
     pre = r"(?:و|ف)?(?:ال|لل|ل|ب)?" if prefix else ""
     suf = r"\w*" if suffix else ""
-    return rf"(?<!\w)(?:{pre})(?:{alts}){suf}(?!\w)"
+    return rf"(?<!\w){pre}(?:{alts}){suf}(?!\w)"
 
 
 # ======================================================================
-#  كشف طلبات العملاء الحقيقية (نظام نقاط + ذكاء اصطناعي اختياري)
+#  كشف طلبات العملاء الحقيقية (نظام نقاط)
 # ======================================================================
 FILTER_REQUESTS = os.getenv("FILTER_REQUESTS", "1") == "1"
 DETECTION_DEBUG = os.getenv("DETECTION_DEBUG", "0") == "1"
@@ -276,35 +263,6 @@ def _has_phone(text):
     return re.search(r"(?<!\d)(?:\+?966|00966|0)?5\d{8}(?!\d)", t) is not None
 
 
-# ---- وظيفة الذكاء الاصطناعي الإضافية (اختيارية وتعمل بتوافق تام) ----
-def ai_verify_request(text):
-    """
-    تستიدم الذكاء الاصطناعي لتحليل النص والتحقق مما إذا كان طلب عميل حقيقي.
-    ترجع True إذا كان طلباً حقيقياً، و False إذا كان إعلاناً أو غير مهم.
-    """
-    if not USE_AI_FILTER or not AI_API_KEY:
-        return None # معطلة، يتم الاعتماد على النظام العادي
-    
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo", # أو أي نموذج سريع واقتصادي مثل groq/llama3
-            messages=[
-                {
-                    "role": "system", 
-                    "content": "أنت مساعد ذكي لتصفية رسائل قروبات التوصيل والمشاوير في السعودية. مهمتك تحديد ما إذا كانت الرسالة الواردة هي 'طلب عميل حقيقي' يبحث عن توصيل/مشوار/أغراض، وليست 'إعلاناً' من سائق أو مندوب يعرض خدماته. أجب بكلمة واحدة فقط: YES (إذا كان طلب عميل) أو NO (إذا كان إعلان أو غير ذلك)."
-                },
-                {"role": "user", "content": text}
-            ],
-            max_tokens=5,
-            temperature=0.0
-        }
-        answer = response.choices[0].message.content.strip().upper()
-        return "YES" in answer
-    except Exception as e:
-        logging.error(f"AI Filter Error: {e}")
-        return None
-
-
 def classify_request(text):
     raw = text or ""
     norm = normalize_text(raw)
@@ -318,14 +276,6 @@ def classify_request(text):
             return False, 0, [f"reject:{label}"]
     if JOB_RE.search(norm) and JOB_QUALIFIER_RE.search(norm):
         return False, 0, ["reject:job-ad"]
-
-    # فحص الذكاء الاصطناعي الاختياري إذا كان مفَعّلاً
-    if USE_AI_FILTER and AI_API_KEY:
-        ai_res = ai_verify_request(raw)
-        if ai_res is False:
-            return False, 0, ["reject:ai-classified-as-ad"]
-        elif ai_res is True:
-            return True, 10, ["approve:ai-verified-customer"]
 
     score = 0
     reasons = []
@@ -456,8 +406,12 @@ def format_time(dt):
     return f"{hour12:02d}:{local.minute:02d} {suffix}"
 
 
-_ROUTE_RE = re.compile(r"من\s+(?P<a>[^\n،,.؟?]{2,30}?)\s+(?:(?:الى|إلى|لين)\s+|ل(?=[ء-ي]))(?P<b>[^\n،,.؟?]{2,30})")
-_ROUTE_STOP_RE = re.compile(r"\s+(?:الساعة|الان|الآن|الحين|بكرة|بكره|اليوم|الليلة|بعد|قبل|وابي|و\s?ابي|ابغى|ابي|ب\s?\d|السعر|بسعر)(?!\w)|\s+\d")
+_ROUTE_RE = re.compile(
+    r"من\s+(?P<a>[^\n،,.؟?]{2,30}?)\s+(?:(?:الى|إلى|لين)\s+|ل(?=[ء-ي]))(?P<b>[^\n،,.؟?]{2,30})"
+)
+_ROUTE_STOP_RE = re.compile(
+    r"\s+(?:الساعة|الان|الآن|الحين|بكرة|بكره|اليوم|الليلة|بعد|قبل|وابي|و\s?ابي|ابغى|ابي|ب\s?\d|السعر|بسعر)(?!\w)|\s+\d"
+)
 
 
 def _clean_place(value):
