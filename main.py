@@ -4,6 +4,7 @@ import time
 import asyncio
 import html
 import logging
+from difflib import SequenceMatcher
 from datetime import timezone, timedelta
 from urllib.parse import quote
 from dotenv import load_dotenv
@@ -134,6 +135,9 @@ def _kw(words, prefix=True, suffix=False):
 #  كشف طلبات العملاء الحقيقية (نظام نقاط)
 #  عدّل القوائم أدناه بحرية؛ كل الكلمات تُطبَّع تلقائياً (أ/ا، ة/ه، ى/ي ...)
 # ======================================================================
+# تصفية الرسائل بالكلمات المفتاحية: معطّلة افتراضياً (كل رسالة نصية تُرسل لك)
+# لتفعيلها لاحقاً ضع FILTER_REQUESTS=1 في متغيرات البيئة
+FILTER_REQUESTS = os.getenv("FILTER_REQUESTS", "0") == "1"
 DETECTION_DEBUG = os.getenv("DETECTION_DEBUG", "0") == "1"
 MIN_REQUEST_SCORE = int(os.getenv("MIN_REQUEST_SCORE", "4"))
 
@@ -249,6 +253,16 @@ WHO_RE = re.compile(
 WHO_FROM_RE = re.compile(
     rf"(?<!\w)من\s+{_kw(['يوصل', 'فاضي', 'متاح', 'يقدر', 'يروح', 'يجيب', 'يشتري', 'يودي', 'عنده', 'متفرغ'], prefix=False, suffix=True)}"
 )
+# سؤال عن وجود أحد في مكان: "مين ب صامطة" / "مين في صبيا" / "احد في جازان"
+# (الاستثناء: "احد المسارحة" اسم مدينة وليس أداة سؤال)
+_QW = _kw(QUESTION_WORDS, prefix=False)
+WHO_LOC_RE = re.compile(
+    rf"{_QW}(?!\s+(?:ال)?(?:مسارحه|رفيده))\s+(?:\S+\s+){{0,2}}?{_kw(PLACE_WORDS + CITY_WORDS)}"
+)
+# رسالة قصيرة كلها سؤال: "مين" / "فيه احد" / "مين هنا" / "احد قريب"
+WHO_ALONE_RE = re.compile(
+    rf"^{_QW}(?:\s+(?:هنا|قريب|حولي|موجود|متواجد|فاضي))?$"
+)
 # الترتيب المعكوس: "فاضي احد؟" / "متاح مين؟"
 WHO_REV_RE = re.compile(
     rf"{_kw(['فاضي', 'فاضيه', 'متاح', 'متفرغ'], prefix=False)}\s+{_kw(['احد', 'حد', 'مين'], prefix=False)}"
@@ -333,6 +347,7 @@ def classify_request(text):
     has_strong = bool(STRONG_RE.search(norm))
     has_who = bool(
         WHO_RE.search(norm) or WHO_FROM_RE.search(norm) or WHO_REV_RE.search(norm)
+        or WHO_LOC_RE.search(norm) or WHO_ALONE_RE.match(norm)
     )
 
     if has_strong:
@@ -386,34 +401,57 @@ def is_real_customer_request(text):
 # ======================================================================
 #  منع تكرار الطلب في عدة قروبات
 # ======================================================================
-DEDUP_WINDOW = int(os.getenv("DEDUP_WINDOW_SECONDS", "1800"))  # 30 دقيقة
+DEDUP_WINDOW = int(os.getenv("DEDUP_WINDOW_SECONDS", "1800"))  # 30 دقيقة (0 = تعطيل المنع)
+SIMILARITY_THRESHOLD = float(os.getenv("DEDUP_SIMILARITY", "0.88"))  # تشابه النص لاعتباره نفس الطلب
 
-_recent_requests = {}  # fingerprint -> آخر وقت ظهور (time.monotonic)
+_recent_by_sender = {}  # sender_id -> [[normalized_text, last_seen], ...]
+_last_cleanup = 0.0
 
 
-def make_fingerprint(sender_id, text):
-    normalized = normalize_text(text)
-    # نفس الشخص + نفس النص => نفس الطلب
-    return f"{sender_id or 'anon'}|{normalized}"
+def _cleanup_recent(now):
+    global _last_cleanup
+    if now - _last_cleanup < 60:
+        return
+    _last_cleanup = now
+    for key in list(_recent_by_sender):
+        kept = [e for e in _recent_by_sender[key] if now - e[1] <= DEDUP_WINDOW]
+        if kept:
+            _recent_by_sender[key] = kept
+        else:
+            del _recent_by_sender[key]
 
 
 def is_duplicate_request(sender_id, text):
-    """يرجع True إذا سبق إرسال نفس الطلب خلال نافذة المنع."""
+    """
+    يرجع True إذا نفس الشخص أرسل نفس الرسالة (أو رسالة مشابهة جداً) في أي قروب
+    خلال نافذة المنع. يلتقط حتى النسخ المعدلة قليلاً (إيموجي، مسافات، همزات، كلمة زائدة).
+    """
+    if DEDUP_WINDOW <= 0:
+        return False
+
     now = time.monotonic()
+    norm = normalize_text(text)
+    _cleanup_recent(now)
 
-    # تنظيف الطلبات القديمة لمنع تضخم الذاكرة
-    expired = [k for k, ts in _recent_requests.items() if now - ts > DEDUP_WINDOW]
-    for k in expired:
-        del _recent_requests[k]
+    entries = _recent_by_sender.setdefault(sender_id or "anon", [])
+    for entry in entries:
+        if now - entry[1] > DEDUP_WINDOW:
+            continue
+        old = entry[0]
+        same = old == norm
+        similar = (
+            not same
+            and len(norm) >= 15
+            and len(old) >= 15
+            and SequenceMatcher(None, old, norm).ratio() >= SIMILARITY_THRESHOLD
+        )
+        if same or similar:
+            # نجدد الوقت: لو استمر نشره كل فترة يبقى محجوباً
+            # (احذف السطر التالي إذا أردت حساب الـ30 دقيقة من أول إشعار فقط)
+            entry[1] = now
+            return True
 
-    fp = make_fingerprint(sender_id, text)
-    if fp in _recent_requests:
-        # نجدد الوقت: لو استمر نشره كل فترة يبقى محجوباً
-        # (احذف السطر التالي إذا أردت حساب الـ30 دقيقة من أول إشعار فقط)
-        _recent_requests[fp] = now
-        return True
-
-    _recent_requests[fp] = now
+    entries.append([norm, now])
     return False
 # --------------------------------------------------------------------
 
@@ -522,11 +560,15 @@ def build_quote(text):
 async def handle_new_message(event):
     message_text = event.raw_text
 
-    # فحص صحة الطلب (نظام النقاط)
-    if not is_real_customer_request(message_text):
+    # تجاهل الرسائل بدون نص (صور فقط، رسائل خدمة ...)
+    if not message_text or not message_text.strip():
         return
 
-    # منع التكرار (نفس الطلب من نفس الشخص في عدة قروبات خلال 30 دقيقة)
+    # تصفية بالكلمات (معطّلة افتراضياً؛ فعّلها بـ FILTER_REQUESTS=1)
+    if FILTER_REQUESTS and not is_real_customer_request(message_text):
+        return
+
+    # منع التكرار (نفس الرسالة من نفس الشخص في عدة قروبات خلال 30 دقيقة)
     if is_duplicate_request(event.sender_id, message_text):
         logging.info(f"Duplicate request skipped (sender={event.sender_id})")
         return
