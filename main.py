@@ -6,28 +6,24 @@ import html
 import logging
 from difflib import SequenceMatcher
 from datetime import timezone, timedelta
-from urllib.parse import quote
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
-# ---- خادم الويب لإبقاء البوت حياً 24/7 (متوافق مع Render) ----
+# ---- خادم الويب لإبقاء البوت حياً 24/7 ----
 from flask import Flask
 from threading import Thread
 
 app = Flask(__name__)
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
-
 @app.route('/')
 def home():
     return "Both UserBot Catchers are alive and running!", 200
 
-
 def run_web_server():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
-
 
 def keep_alive():
     t = Thread(target=run_web_server)
@@ -37,32 +33,19 @@ def keep_alive():
 
 load_dotenv()
 
-def required_env(name):
-    value = os.getenv(name)
-    if not value or not value.strip():
-        raise RuntimeError(f"Missing or empty required environment variable: {name}")
-    return value.strip()
-
-API_ID_1 = int(required_env("TELEGRAM_API_ID"))
-API_HASH_1 = required_env("TELEGRAM_API_HASH")
-TARGET_CHAT_ID = required_env("TELEGRAM_TARGET_CHAT_ID")
-STRING_SESSION_1 = required_env("STRING_SESSION")
+API_ID_1 = int(os.getenv("TELEGRAM_API_ID", "30891622"))
+API_HASH_1 = os.getenv("TELEGRAM_API_HASH", "cf380ef18f4a06e651338496ff72c851")
+TARGET_CHAT_ID = os.getenv("TELEGRAM_TARGET_CHAT_ID", "-1004382902175")
+STRING_SESSION_1 = os.getenv("STRING_SESSION", "").strip()
 
 API_ID_2 = int(os.getenv("TELEGRAM_API_ID_2", "39121133"))
 API_HASH_2 = os.getenv("TELEGRAM_API_HASH_2", "12b31138fd1b526e0c02b776b1c09936")
 STRING_SESSION_2 = os.getenv("STRING_SESSION_2", "").strip()
 
-# إنشاء عميل الحساب الأول دائماً
-client1 = TelegramClient(StringSession(STRING_SESSION_1), API_ID_1, API_HASH_1)
+# إنشاء العملاء بشكل آمن تماماً
+client1 = TelegramClient(StringSession(STRING_SESSION_1), API_ID_1, API_HASH_1) if STRING_SESSION_1 else None
+client2 = TelegramClient(StringSession(STRING_SESSION_2), API_ID_2, API_HASH_2) if STRING_SESSION_2 else None
 
-# إنشاء عميل الحساب الثاني بشكل آمن
-if STRING_SESSION_2:
-    client2 = TelegramClient(StringSession(STRING_SESSION_2), API_ID_2, API_HASH_2)
-else:
-    client2 = None
-    print("WARNING: STRING_SESSION_2 is missing or empty. Running with client1 only.")
-
-# قائمة القروبات المحدثة (بدون تكرار)
 ALLOWED_GROUPS = [
     "Testorders1", "taxijazan", "taxijazan1", "Jazan_Taxi", "JazanTrans",
     "jiuzin_jazan", "manadibbknk", "jazandraivers007", "JazanShift", "mkjhpo",
@@ -72,9 +55,6 @@ ALLOWED_GROUPS = [
     "DarbJazan", "taxi_jizan", "DarbSamtah"
 ]
 
-# ======================================================================
-#  أدوات تطبيع النص العربي ومنع التكرار
-# ======================================================================
 _DIACRITICS_RE = re.compile(r"[\u0610-\u061A\u064B-\u065F\u0670\u0640]")
 _NON_WORD_RE = re.compile(r"[^\w\s]", re.UNICODE)
 _DIGITS_TABLE = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
@@ -157,12 +137,17 @@ async def process_incoming_message(event, client_label):
         final_message += f"💬 <a href='{direct_chat_link}'>محادثة العميل مباشرة</a>\n"
 
     try:
-        await client1.send_message(int(TARGET_CHAT_ID) if TARGET_CHAT_ID.lstrip('-').isdigit() else TARGET_CHAT_ID, final_message, parse_mode='html', link_preview=False)
+        target = int(TARGET_CHAT_ID) if TARGET_CHAT_ID.lstrip('-').isdigit() else TARGET_CHAT_ID
+        if client1:
+            await client1.send_message(target, final_message, parse_mode='html', link_preview=False)
+        elif client2:
+            await client2.send_message(target, final_message, parse_mode='html', link_preview=False)
     except Exception as e:
         logging.error(f"Failed to forward message: {e}")
 
-@client1.on(events.NewMessage(chats=ALLOWED_GROUPS))
-async def handle_client1(event): await process_incoming_message(event, "محمد دويري")
+if client1:
+    @client1.on(events.NewMessage(chats=ALLOWED_GROUPS))
+    async def handle_client1(event): await process_incoming_message(event, "محمد دويري")
 
 if client2:
     @client2.on(events.NewMessage(chats=ALLOWED_GROUPS))
@@ -172,18 +157,20 @@ async def main():
     keep_alive()
     print("Starting Telegram Userbot(s)...")
     
-    clients_to_run = [client1.start()]
-    if client2:
-        clients_to_run.append(client2.start())
+    clients_to_run = []
+    if client1: clients_to_run.append(client1.start())
+    if client2: clients_to_run.append(client2.start())
     
-    await asyncio.gather(*clients_to_run)
-    print("Userbots are running successfully.")
+    if clients_to_run:
+        await asyncio.gather(*clients_to_run)
+        print("Userbots are running successfully.")
     
-    disconnects = [client1.run_until_disconnected()]
-    if client2:
-        disconnects.append(client2.run_until_disconnected())
+    disconnects = []
+    if client1: disconnects.append(client1.run_until_disconnected())
+    if client2: disconnects.append(client2.run_until_disconnected())
         
-    await asyncio.gather(*disconnects)
+    if disconnects:
+        await asyncio.gather(*disconnects)
 
 if __name__ == '__main__':
     try:
