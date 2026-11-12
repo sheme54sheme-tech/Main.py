@@ -44,7 +44,12 @@ STRING_SESSION_2 = os.getenv("STRING_SESSION_2", "").strip()
 
 # إنشاء العملاء بشكل آمن ودقيق مطابقة لأسماء الـ Environment
 client1 = TelegramClient(StringSession(STRING_SESSION_1), API_ID_1, API_HASH_1) if STRING_SESSION_1 else None
-client2 = TelegramClient(StringSession(STRING_SESSION_2), API_ID_2, API_HASH_2) if STRING_SESSION_2 else None
+# بدلاً من الكود القديم الذي يسبب انهيار التطبيق، استبدله بهذا:
+try:
+    client2 = TelegramClient(StringSession(STRING_SESSION_2), API_ID_2, API_HASH_2) if STRING_SESSION_2 else None
+except Exception as e:
+    print(f"Warning: Could not initialize client2 due to session error: {e}")
+    client2 = None
 
 ALLOWED_GROUPS = [
     "Testorders1", "taxijazan", "taxijazan1", "Jazan_Taxi", "JazanTrans",
