@@ -46,15 +46,9 @@ STRING_SESSION_2 = os.getenv("STRING_SESSION_2", "").strip()
 # مجموعة التوجيه المشتركة
 TARGET_CHAT_ID = os.getenv("TELEGRAM_TARGET_CHAT_ID", "-1004382902175")
 
-# إنشاء عميل الحساب الأول
+# إنشاء عملاء تيليجرام (بدون الانتظار المسبب للتجميد)
 client1 = TelegramClient(StringSession(STRING_SESSION_1), API_ID_1, API_HASH_1) if STRING_SESSION_1 else None
-
-# إنشاء عميل الحساب الثاني مع حماية لمنع انهيار السيرفر إذا حدث خطأ في جلسته
-try:
-    client2 = TelegramClient(StringSession(STRING_SESSION_2), API_ID_2, API_HASH_2) if STRING_SESSION_2 else None
-except Exception as e:
-    print(f"Warning: Could not initialize client2 due to session error: {e}")
-    client2 = None
+client2 = TelegramClient(StringSession(STRING_SESSION_2), API_ID_2, API_HASH_2) if STRING_SESSION_2 else None
 
 _DIACRITICS_RE = re.compile(r"[\u0610-\u061A\u064B-\u065F\u0670\u0640]")
 _NON_WORD_RE = re.compile(r"[^\w\s]", re.UNICODE)
@@ -149,7 +143,6 @@ async def process_incoming_message(event, client_label):
     except Exception as e:
         logging.error(f"Failed to forward message: {e}")
 
-# استماع عام وفحص دقيق لجميع الرسائل لطباعتها في سجلات Render
 async def diagnostic_handler(event, label):
     if event.is_group or event.is_channel:
         chat = await event.get_chat()
@@ -170,25 +163,26 @@ async def main():
     keep_alive()
     print("Starting Telegram Userbot(s)...")
     
-    # فحص الحساب الأول والتحقق من اتصاله كـ UserBot
+    # الاتصال المباشر بدون تجميد
     if client1:
-        try:
-            await client1.start()
+        print("Connecting client 1...")
+        await client1.connect()
+        if not await client1.is_user_authorized():
+            print("❌ الحساب الأول غير مصرح (Session غير صالحة أو منتهية)")
+        else:
             me1 = await client1.get_me()
-            print(f"✅ الحساب الأول متصل بنجاح باسم: {me1.first_name} (ID: {me1.id})")
-        except Exception as e:
-            print(f"❌ خطأ في تشغيل الحساب الأول: {e}")
-            
-    # فحص الحساب الثاني والتحقق من اتصاله كـ UserBot
+            print(f"✅ الحساب الأول متصل بنجاح: {me1.first_name} ({me1.id})")
+
     if client2:
-        try:
-            await client2.start()
+        print("Connecting client 2...")
+        await client2.connect()
+        if not await client2.is_user_authorized():
+            print("❌ الحساب الثاني غير مصرح (Session غير صالحة أو منتهية)")
+        else:
             me2 = await client2.get_me()
-            print(f"✅ الحساب الثاني متصل بنجاح باسم: {me2.first_name} (ID: {me2.id})")
-        except Exception as e:
-            print(f"❌ خطأ في تشغيل الحساب الثاني: {e}")
+            print(f"✅ الحساب الثاني متصل بنجاح: {me2.first_name} ({me2.id})")
     
-    print("Userbots are running successfully and listening...")
+    print("Userbots are running and listening to all chats...")
     
     disconnects = []
     if client1: disconnects.append(client1.run_until_disconnected())
