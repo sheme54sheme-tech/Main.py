@@ -33,18 +33,23 @@ def keep_alive():
 
 load_dotenv()
 
+# إعدادات الحساب الأول
 API_ID_1 = int(os.getenv("TELEGRAM_API_ID", "30891622"))
 API_HASH_1 = os.getenv("TELEGRAM_API_HASH", "cf380ef18f4a06e651338496ff72c851")
-TARGET_CHAT_ID = os.getenv("TELEGRAM_TARGET_CHAT_ID", "-1004382902175")
 STRING_SESSION_1 = os.getenv("STRING_SESSION", "").strip()
 
-API_ID_2 = int(os.getenv("TELEGRAM_API_ID_2", "39121133"))
-API_HASH_2 = os.getenv("TELEGRAM_API_HASH_2", "12b31138fd1b526e0c02b776b1c09936")
+# إعدادات الحساب الثاني
+API_ID_2 = int(os.getenv("API_ID_2", "39121133"))
+API_HASH_2 = os.getenv("API_HASH_2", "12b31138fd1b526e0c02b776b1c09936")
 STRING_SESSION_2 = os.getenv("STRING_SESSION_2", "").strip()
 
-# إنشاء العملاء بشكل آمن ودقيق مطابقة لأسماء الـ Environment
+# مجموعة التوجيه المشتركة
+TARGET_CHAT_ID = os.getenv("TELEGRAM_TARGET_CHAT_ID", "-1004382902175")
+
+# إنشاء عميل الحساب الأول
 client1 = TelegramClient(StringSession(STRING_SESSION_1), API_ID_1, API_HASH_1) if STRING_SESSION_1 else None
-# بدلاً من الكود القديم الذي يسبب انهيار التطبيق، استبدله بهذا:
+
+# إنشاء عميل الحساب الثاني مع حماية لمنع انهيار السيرفر إذا حدث خطأ في جلسته
 try:
     client2 = TelegramClient(StringSession(STRING_SESSION_2), API_ID_2, API_HASH_2) if STRING_SESSION_2 else None
 except Exception as e:
@@ -117,6 +122,7 @@ def format_time(dt):
     local = dt.astimezone(RIYADH_TZ)
     return f"{local.hour % 12 or 12:02d}:{local.minute:02d} {'ص' if local.hour < 12 else 'م'}"
 
+# دالة موحدة لمعالجة وإرسال الرسائل لأي من الحسابين مع إظهار اسم الحساب الملتقط
 async def process_incoming_message(event, client_label):
     message_text = event.raw_text
     if not message_text or not message_text.strip(): return
@@ -143,6 +149,7 @@ async def process_incoming_message(event, client_label):
 
     try:
         target = int(TARGET_CHAT_ID) if TARGET_CHAT_ID.lstrip('-').isdigit() else TARGET_CHAT_ID
+        # التوجيه عبر الحساب الأول إن وجد، وإلا فالثاني
         if client1:
             await client1.send_message(target, final_message, parse_mode='html', link_preview=False)
         elif client2:
@@ -150,13 +157,17 @@ async def process_incoming_message(event, client_label):
     except Exception as e:
         logging.error(f"Failed to forward message: {e}")
 
+# ربط الأحداث بالحساب الأول
 if client1:
     @client1.on(events.NewMessage(chats=ALLOWED_GROUPS))
-    async def handle_client1(event): await process_incoming_message(event, "محمد دويري")
+    async def handle_client1(event): 
+        await process_incoming_message(event, "الحساب الأول")
 
+# ربط الأحداث بالحساب الثاني
 if client2:
     @client2.on(events.NewMessage(chats=ALLOWED_GROUPS))
-    async def handle_client2(event): await process_incoming_message(event, "الحساب الثاني")
+    async def handle_client2(event): 
+        await process_incoming_message(event, "الحساب الثاني")
 
 async def main():
     keep_alive()
