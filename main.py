@@ -56,15 +56,6 @@ except Exception as e:
     print(f"Warning: Could not initialize client2 due to session error: {e}")
     client2 = None
 
-ALLOWED_GROUPS = [
-  -1004343807895, "@taxijazan", "@taxijazan1", "@Jazan_Taxi", "@JazanTrans",
-    "@jiuzin_jazan", "@manadibbknk", "@jazandraivers007", "@JazanShift", "@mkjhpo",
-    "@JazanRoute", "@mhndq121", "@SamtaTaxi", "@Jazan09", "@ba2rq", "@JazanTaxi",
-    "@DeliveryJazan", "@JazanWagon", "@Azoz6612", "@JazanTax", "@hhbsjg",
-    "@JazanMover", "@JazanZoom", "@JU_Naqil", "@jaz0iii", "@DarbSabya",
-    "@DarbJazan", "@taxi_jizan", "@DarbSamtah"
-]
-
 _DIACRITICS_RE = re.compile(r"[\u0610-\u061A\u064B-\u065F\u0670\u0640]")
 _NON_WORD_RE = re.compile(r"[^\w\s]", re.UNICODE)
 _DIGITS_TABLE = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
@@ -84,10 +75,10 @@ def _kw(words, prefix=True, suffix=False):
     return rf"(?<!\w){pre}(?:{alts})\w*(?!\w)" if suffix else rf"(?<!\w){pre}(?:{alts})(?!\w)"
 
 FILTER_REQUESTS = os.getenv("FILTER_REQUESTS", "1") == "1"
-MIN_REQUEST_SCORE = int(os.getenv("MIN_REQUEST_SCORE", "3"))
+MIN_REQUEST_SCORE = int(os.getenv("MIN_REQUEST_SCORE", "1"))
 
 ASK_WORDS = ["ابي", "ابغى", "ابغا", "ابا", "ابى", "ابغاه", "ابغاها", "ابيه", "بغيت", "احتاج", "محتاج", "محتاجه", "محتاجة", "نحتاج", "نبغى", "نبي", "ودي", "اريد", "مطلوب"]
-SERVICE_WORDS = ["توصيل", "توصيله", "توصيلة", "مشوار", "سواق", "سائق", "سايق", "كابتن", "مندوب", "سياره", "سيارة", "تكسي", "تاكسي", "ليموزين", "نقل", "رحله", "رحلة"]
+SERVICE_WORDS = ["توصيل", "توصيله", "توصيلة", "مشوار", "سواق", "سائق", "سايق", "كابتن", "مندوب", "سياره", "سيارة", "تكسي", "تاكسي", "ليموزين", "نقل", "رحله", "رحلة", "طلب"]
 STRONG_PHRASES = ["مين يوصلني", "مين يوصلنا", "مين فاضي", "مين فاضية", "مين متاح", "مين يقدر", "مين يمرني", "ابي مشوار", "ابغى مشوار", "محتاج مشوار", "احتاج مشوار", "نبي مشوار"]
 
 ASK_RE = re.compile(_kw(ASK_WORDS))
@@ -122,8 +113,10 @@ def format_time(dt):
     local = dt.astimezone(RIYADH_TZ)
     return f"{local.hour % 12 or 12:02d}:{local.minute:02d} {'ص' if local.hour < 12 else 'م'}"
 
-# دالة موحدة لمعالجة وإرسال الرسائل لأي من الحسابين مع إظهار اسم الحساب الملتقط
 async def process_incoming_message(event, client_label):
+    if str(event.chat_id) in str(TARGET_CHAT_ID):
+        return
+
     message_text = event.raw_text
     if not message_text or not message_text.strip(): return
     if FILTER_REQUESTS and not is_real_customer_request(message_text): return
@@ -148,8 +141,7 @@ async def process_incoming_message(event, client_label):
         final_message += f"💬 <a href='{direct_chat_link}'>محادثة العميل مباشرة</a>\n"
 
     try:
-        target = int(TARGET_CHAT_ID) if TARGET_CHAT_ID.lstrip('-').isdigit() else TARGET_CHAT_ID
-        # التوجيه عبر الحساب الأول إن وجد، وإلا فالثاني
+        target = int(TARGET_CHAT_ID) if str(TARGET_CHAT_ID).lstrip('-').isdigit() else TARGET_CHAT_ID
         if client1:
             await client1.send_message(target, final_message, parse_mode='html', link_preview=False)
         elif client2:
@@ -157,29 +149,46 @@ async def process_incoming_message(event, client_label):
     except Exception as e:
         logging.error(f"Failed to forward message: {e}")
 
-# ربط الأحداث بالحساب الأول
-if client1:
-    @client1.on(events.NewMessage(chats=ALLOWED_GROUPS))
-    async def handle_client1(event): 
-        await process_incoming_message(event, "الحساب الأول")
+# استماع عام وفحص دقيق لجميع الرسائل لطباعتها في سجلات Render
+async def diagnostic_handler(event, label):
+    if event.is_group or event.is_channel:
+        chat = await event.get_chat()
+        print(f"🔍 [{label}] وصلت رسالة من القروب: {getattr(chat, 'title', 'بدون اسم')} (ID: {event.chat_id}) - النص: {event.raw_text}")
+        await process_incoming_message(event, label)
 
-# ربط الأحداث بالحساب الثاني
+if client1:
+    @client1.on(events.NewMessage)
+    async def handle_client1(event):
+        await diagnostic_handler(event, "الحساب الأول")
+
 if client2:
-    @client2.on(events.NewMessage(chats=ALLOWED_GROUPS))
-    async def handle_client2(event): 
-        await process_incoming_message(event, "الحساب الثاني")
+    @client2.on(events.NewMessage)
+    async def handle_client2(event):
+        await diagnostic_handler(event, "الحساب الثاني")
 
 async def main():
     keep_alive()
     print("Starting Telegram Userbot(s)...")
     
-    clients_to_run = []
-    if client1: clients_to_run.append(client1.start())
-    if client2: clients_to_run.append(client2.start())
+    # فحص الحساب الأول والتحقق من اتصاله كـ UserBot
+    if client1:
+        try:
+            await client1.start()
+            me1 = await client1.get_me()
+            print(f"✅ الحساب الأول متصل بنجاح باسم: {me1.first_name} (ID: {me1.id})")
+        except Exception as e:
+            print(f"❌ خطأ في تشغيل الحساب الأول: {e}")
+            
+    # فحص الحساب الثاني والتحقق من اتصاله كـ UserBot
+    if client2:
+        try:
+            await client2.start()
+            me2 = await client2.get_me()
+            print(f"✅ الحساب الثاني متصل بنجاح باسم: {me2.first_name} (ID: {me2.id})")
+        except Exception as e:
+            print(f"❌ خطأ في تشغيل الحساب الثاني: {e}")
     
-    if clients_to_run:
-        await asyncio.gather(*clients_to_run)
-        print("Userbots are running successfully.")
+    print("Userbots are running successfully and listening...")
     
     disconnects = []
     if client1: disconnects.append(client1.run_until_disconnected())
