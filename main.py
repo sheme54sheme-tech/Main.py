@@ -57,12 +57,12 @@ except Exception as e:
     client2 = None
 
 ALLOWED_GROUPS = [
-    "Testorders1", "taxijazan", "taxijazan1", "Jazan_Taxi", "JazanTrans",
-    "jiuzin_jazan", "manadibbknk", "jazandraivers007", "JazanShift", "mkjhpo",
-    "JazanRoute", "mhndq121", "SamtaTaxi", "Jazan09", "ba2rq", "JazanTaxi",
-    "DeliveryJazan", "JazanWagon", "Azoz6612", "JazanTax", "hhbsjg",
-    "JazanMover", "JazanZoom", "JU_Naqil", "jaz0iii", "DarbSabya",
-    "DarbJazan", "taxi_jizan", "DarbSamtah"
+  "@Testorders1", "@taxijazan", "@taxijazan1", "@Jazan_Taxi", "@JazanTrans",
+    "@jiuzin_jazan", "@manadibbknk", "@jazandraivers007", "@JazanShift", "@mkjhpo",
+    "@JazanRoute", "@mhndq121", "@SamtaTaxi", "@Jazan09", "@ba2rq", "@JazanTaxi",
+    "@DeliveryJazan", "@JazanWagon", "@Azoz6612", "@JazanTax", "@hhbsjg",
+    "@JazanMover", "@JazanZoom", "@JU_Naqil", "@jaz0iii", "@DarbSabya",
+    "@DarbJazan", "@taxi_jizan", "@DarbSamtah"
 ]
 
 _DIACRITICS_RE = re.compile(r"[\u0610-\u061A\u064B-\u065F\u0670\u0640]")
