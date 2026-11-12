@@ -22,7 +22,7 @@ logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 @app.route('/')
 def home():
-    return "Bot is alive and running!", 200
+    return "Both UserBot Catchers are alive and running!", 200
 
 
 def run_web_server():
@@ -47,16 +47,26 @@ def required_env(name):
 
 
 try:
-    API_ID = int(required_env("TELEGRAM_API_ID"))
+    API_ID_1 = int(required_env("TELEGRAM_API_ID"))
 except ValueError as error:
     raise RuntimeError("TELEGRAM_API_ID must be an integer") from error
 
-API_HASH = required_env("TELEGRAM_API_HASH")
+API_HASH_1 = required_env("TELEGRAM_API_HASH")
 TARGET_CHAT_ID = required_env("TELEGRAM_TARGET_CHAT_ID")
-STRING_SESSION = os.getenv("STRING_SESSION", "")
+STRING_SESSION_1 = os.getenv("STRING_SESSION", "")
 
-# استخدام StringSession لتفادي مشاكل الحظر وجلسات الحساب
-client = TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
+# إعدادات الحساب الثاني
+try:
+    API_ID_2 = int(os.getenv("TELEGRAM_API_ID_2", "39121133"))
+except ValueError as error:
+    raise RuntimeError("TELEGRAM_API_ID_2 must be an integer") from error
+
+API_HASH_2 = os.getenv("TELEGRAM_API_HASH_2", "12b31138fd1b526e0c02b776b1c09936")
+STRING_SESSION_2 = os.getenv("STRING_SESSION_2", "")
+
+# إنشاء عميلين مستقلين للحسابين
+client1 = TelegramClient(StringSession(STRING_SESSION_1), API_ID_1, API_HASH_1)
+client2 = TelegramClient(StringSession(STRING_SESSION_2), API_ID_2, API_HASH_2)
 
 TEST_GROUP = "testorders1"
 
@@ -338,7 +348,7 @@ def is_real_customer_request(text):
 
 
 # ======================================================================
-#  منع تكرار الطلب في عدة قروبات
+#  منع تكرار الطلب في عدة قروبات والحسابات (مانع التكرار العالمي)
 # ======================================================================
 DEDUP_WINDOW = int(os.getenv("DEDUP_WINDOW_SECONDS", "1800"))
 SIMILARITY_THRESHOLD = float(os.getenv("DEDUP_SIMILARITY", "0.88"))
@@ -407,7 +417,7 @@ def format_time(dt):
 
 
 _ROUTE_RE = re.compile(
-    r"من\s+(?P<a>[^\n،,.؟?]{2,30}?)\s+(?:(?:الى|إلى|لين)\s+|ل(?=[ء-ي]))(?P<b>[^\n،,.؟?]{2,30})"
+    r"من\s+(?P<a>[^\n,.ي?]{2,30}?)\s+(?:(?:الى|إلى|لين)\s+|ل(?=[ء-ي]))(?P<b>[^\n,.ي?]{2,30})"
 )
 _ROUTE_STOP_RE = re.compile(
     r"\s+(?:الساعة|الان|الآن|الحين|بكرة|بكره|اليوم|الليلة|بعد|قبل|وابي|و\s?ابي|ابغى|ابي|ب\s?\d|السعر|بسعر)(?!\w)|\s+\d"
@@ -474,9 +484,8 @@ def build_quote(text):
         return f"<code>{safe_text}</code>"
 
 
-# ---------------- معالجة الرسائل واستماع الأحداث ----------------
-@client.on(events.NewMessage(chats=ALLOWED_GROUPS))
-async def handle_new_message(event):
+# ---------------- معالجة الرسائل المشتركة للحسابين ----------------
+async def process_incoming_message(event, client_label):
     message_text = event.raw_text
 
     if not message_text or not message_text.strip():
@@ -486,7 +495,7 @@ async def handle_new_message(event):
         return
 
     if is_duplicate_request(event.sender_id, message_text):
-        logging.info(f"Duplicate request skipped (sender={event.sender_id})")
+        logging.info(f"Duplicate request skipped (sender={event.sender_id}) [via {client_label}]")
         return
 
     route = extract_route(message_text)
@@ -527,7 +536,7 @@ async def handle_new_message(event):
         message_link = f"https://t.me/{chat.username}/{event.id}"
 
     final_message = (
-        f"🚗 <b>طلب مشوار جديد</b> {tags}\n"
+        f"🚗 <b>طلب مشوار جديد ({client_label})</b> {tags}\n"
         f"──────────────────\n"
         f"👤 <b>العميل:</b> {sender_name}\n"
         f"📍 <b>المصدر:</b> {html.escape(chat_title)}\n"
@@ -546,7 +555,7 @@ async def handle_new_message(event):
         final_message += f"👁️ <a href='{message_link}'>عرض الرسالة في القروب الأصلي</a>\n"
 
     try:
-        await client.send_message(
+        await client1.send_message(
             int(TARGET_CHAT_ID) if TARGET_CHAT_ID.lstrip('-').isdigit() else TARGET_CHAT_ID,
             final_message,
             parse_mode='html',
@@ -556,13 +565,37 @@ async def handle_new_message(event):
         logging.error(f"Failed to forward message: {e}")
 
 
-# ---------------- التشغيل الرئيسي للبوت وخادم الويب ----------------
-if __name__ == '__main__':
-    keep_alive()
+# ربط أحداث القروبات بالحساب الأول
+@client1.on(events.NewMessage(chats=ALLOWED_GROUPS))
+async def handle_client1_message(event):
+    await process_incoming_message(event, "محمد دويري")
 
+
+# ربط أحداث القروبات بالحساب الثاني
+@client2.on(events.NewMessage(chats=ALLOWED_GROUPS))
+async def handle_client2_message(event):
+    await process_incoming_message(event, "الحساب الثاني")
+
+
+# ---------------- التشغيل المتزامن للبوت وخادم الويب ----------------
+async def main():
+    keep_alive()
+    print("Starting both Telegram Userbot accounts concurrently...")
+    
+    await asyncio.gather(
+        client1.start(),
+        client2.start()
+    )
+    print("Both userbots are running and listening to groups successfully.")
+    
+    await asyncio.gather(
+        client1.run_until_disconnected(),
+        client2.run_until_disconnected()
+    )
+
+
+if __name__ == '__main__':
     try:
-        print("Starting Telegram Userbot...")
-        client.start()
-        client.run_until_disconnected()
+        asyncio.run(main())
     except Exception as e:
         print(f"Telegram Bot Error: {e}")
