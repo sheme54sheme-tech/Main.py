@@ -57,7 +57,7 @@ except Exception as e:
     client2 = None
 
 ALLOWED_GROUPS = [
-  "@Testorders1", "@taxijazan", "@taxijazan1", "@Jazan_Taxi", "@JazanTrans",
+  "-1004382902175", "@taxijazan", "@taxijazan1", "@Jazan_Taxi", "@JazanTrans",
     "@jiuzin_jazan", "@manadibbknk", "@jazandraivers007", "@JazanShift", "@mkjhpo",
     "@JazanRoute", "@mhndq121", "@SamtaTaxi", "@Jazan09", "@ba2rq", "@JazanTaxi",
     "@DeliveryJazan", "@JazanWagon", "@Azoz6612", "@JazanTax", "@hhbsjg",
