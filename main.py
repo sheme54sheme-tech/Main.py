@@ -33,17 +33,17 @@ def keep_alive():
 
 load_dotenv()
 
+# قراءة المتغيرات مطابقة تماماً لصورتك في لوحة تحكم Render
 API_ID_1 = int(os.getenv("TELEGRAM_API_ID", "30891622"))
 API_HASH_1 = os.getenv("TELEGRAM_API_HASH", "cf380ef18f4a06e651338496ff72c851")
 TARGET_CHAT_ID = os.getenv("TELEGRAM_TARGET_CHAT_ID", "-1004382902175")
 STRING_SESSION_1 = os.getenv("STRING_SESSION", "").strip()
 
-API_ID_2 = 39121133
-API_HASH_2 = "12b31138fd1b526e0c02b776b1c09936"
-# وضعنا الجلسة الثانية هنا مباشرة لضمان قراءتها 100% دون أخطاء
-STRING_SESSION_2 = "N8mxqrGGnyGxek5hME3t8sryEv80emzN3d8Vz2IpMa5sVpxInGRv0SQmHPQwgMIJn3EH"
+API_ID_2 = int(os.getenv("TELEGRAM_API_ID_2", "39121133"))
+API_HASH_2 = os.getenv("TELEGRAM_API_HASH_2", "12b31138fd1b526e0c02b776b1c09936")
+STRING_SESSION_2 = os.getenv("STRING_SESSION_2", "").strip()
 
-# إنشاء العملاء بشكل آمن تماماً
+# إنشاء العملاء بشكل آمن ودقيق
 client1 = TelegramClient(StringSession(STRING_SESSION_1), API_ID_1, API_HASH_1) if STRING_SESSION_1 else None
 client2 = TelegramClient(StringSession(STRING_SESSION_2), API_ID_2, API_HASH_2) if STRING_SESSION_2 else None
 
